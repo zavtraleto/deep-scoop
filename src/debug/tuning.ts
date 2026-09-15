@@ -1,22 +1,39 @@
 import GUI from 'lil-gui';
-import { cameraConfig, cargoConfig, debugConfig, movementConfig, stickConfig } from '../core/config';
+import { cameraConfig, cargoConfig, collectConfig, debugConfig, movementConfig, stickConfig } from '../core/config';
 
-// Меняй версию, когда меняется набор параметров движения: старые сохранения несовместимы.
-const STORAGE_KEY = 'memory-dive:tuning:v3';
+// Меняй версию, когда смысл или значения по умолчанию параметров меняются так, что старые сохранения вредны.
+// Новые поля добавлять можно без смены версии: mergeInto переносит только известные поля.
+const STORAGE_KEY = 'memory-dive:tuning:v4';
 const groups = {
   movement: movementConfig,
   cargo: cargoConfig,
+  collect: collectConfig,
   stick: stickConfig,
   camera: cameraConfig,
   debug: debugConfig,
 };
 const defaults = structuredClone(groups);
 
+/**
+ * Рекурсивно переписать в dst значения известных ему полей из src. Объекты dst не подменяются:
+ * на них держатся контроллеры панели и ссылки из игрового кода (collectConfig.scoop).
+ */
+const mergeInto = (dst: Record<string, unknown>, src: Record<string, unknown>) => {
+  for (const [k, v] of Object.entries(src)) {
+    if (!(k in dst)) continue;
+    const d = dst[k];
+    if (v && typeof v === 'object' && d && typeof d === 'object') {
+      mergeInto(d as Record<string, unknown>, v as Record<string, unknown>);
+    } else if (typeof v === typeof d) {
+      dst[k] = v;
+    }
+  }
+};
+
 const load = () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<typeof groups> | null;
-    if (!saved) return;
-    for (const key of Object.keys(groups) as (keyof typeof groups)[]) Object.assign(groups[key], saved[key]);
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Record<string, unknown> | null;
+    if (saved) mergeInto(groups, saved);
   } catch {
     // Повреждённое или недоступное хранилище — остаёмся на значениях по умолчанию.
   }
@@ -35,12 +52,22 @@ export interface TuningStats {
   input: number;
   mass: number;
   drift: number;
+  /** §6.4: ковш стирает на этом шаге. */
+  noise: boolean;
+  /** Прогресс извлечения объекта, %. */
+  progress: number;
+}
+
+/** Состояние забега, которое удобно крутить руками. В localStorage не сохраняется. */
+export interface TuningRun {
+  cargo: number;
+  resetObjects: () => void;
 }
 
 /** Панель тюнинга: параметры сохраняются в localStorage, кнопка копирует их JSON для переноса в config.ts. */
-export const createTuningPanel = (stats: TuningStats): GUI => {
+export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   load();
-  const gui = new GUI({ title: 'Тюнинг (G — скрыть)' });
+  const gui = new GUI({ title: 'Тюнинг (G — скрыть отладку)' });
   if (matchMedia('(pointer: coarse)').matches) gui.close();
 
   const live = gui.addFolder('Показатели');
@@ -58,6 +85,8 @@ export const createTuningPanel = (stats: TuningStats): GUI => {
   const t = gui.addFolder('Поворот и тормоз');
   t.add(movementConfig, 'steerRate', 1, 30, 0.1).name('доворот носа, рад/с');
   t.add(movementConfig, 'steerLowSpeedBoost', 0, 6, 0.1).name('доворот на месте ×');
+  t.add(movementConfig, 'steerSpinUpTime', 0.001, 1, 0.005).name('инерция вращения, с');
+  t.add(movementConfig, 'steerSettleTime', 0.001, 0.5, 0.005).name('мягкость доворота, с');
   t.add(movementConfig, 'thrustAlignmentPower', 0, 4, 0.05).name('тяга только по носу');
   t.add(movementConfig, 'rearSectorDeg', 0, 180, 1).name('задний сектор, °');
   t.add(movementConfig, 'brakeTime', 0.05, 2, 0.01).name('тормоз, с');
@@ -76,9 +105,21 @@ export const createTuningPanel = (stats: TuningStats): GUI => {
 
   gui.add(debugConfig, 'showStickZones').name('👁 зоны стика у игрока');
 
-  const c = gui.addFolder('Груз (тест массы)');
-  c.add(cargoConfig, 'cargo', 0, 30, 0.1).name('cargo').listen();
+  live.add(stats, 'noise').name('шум (стирает)').listen().disable();
+  live.add(stats, 'progress').name('извлечено, %').decimals(1).listen().disable();
+
+  const c = gui.addFolder('Ковш и груз');
+  c.add(run, 'cargo', 0, 30, 0.1).name('cargo').listen();
   c.add(cargoConfig, 'cargoMax', 1, 30, 1).name('cargoMax');
+  const scoop = collectConfig.scoop;
+  c.add(scoop, 'width', 0.2, 4, 0.05).name('ширина ковша');
+  c.add(scoop, 'depth', 0.1, 2, 0.05).name('глубина ковша');
+  c.add(scoop, 'offset', -0.5, 1.5, 0.05).name('отступ от центра');
+  c.add(scoop, 'followNose').name('ковш по носу (а не по скорости)');
+  c.add(scoop, 'noseBlendSpeed', 0.1, 4, 0.05).name('на нос ниже скорости');
+  c.add(scoop, 'turnRate', 1, 60, 0.5).name('сглаживание поворота');
+  c.add(collectConfig, 'particlesPerStep', 0, 30, 1).name('частиц за шаг');
+  c.add(run, 'resetObjects').name('↺ Восстановить объект и груз');
 
   const s = gui.addFolder('Стик');
   s.add(stickConfig, 'radius', 30, 200, 1).name('радиус, px');
@@ -100,7 +141,7 @@ export const createTuningPanel = (stats: TuningStats): GUI => {
       navigator.clipboard?.writeText(json).catch(() => undefined);
     },
     reset: () => {
-      for (const key of Object.keys(groups) as (keyof typeof groups)[]) Object.assign(groups[key], defaults[key]);
+      mergeInto(groups, defaults);
       gui.controllersRecursive().forEach((ctrl) => ctrl.updateDisplay());
       save();
     },
@@ -109,8 +150,13 @@ export const createTuningPanel = (stats: TuningStats): GUI => {
   gui.add(actions, 'reset').name('↺ Сбросить к GDD');
 
   gui.onChange(save);
+  // G прячет и показывает всю отладку разом: панель и отладочные элементы в сцене.
+  gui.show(debugConfig.visible);
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyG') gui.show(gui._hidden);
+    if (e.code !== 'KeyG' || e.repeat) return;
+    debugConfig.visible = !debugConfig.visible;
+    gui.show(debugConfig.visible);
+    save();
   });
   return gui;
 };

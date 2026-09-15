@@ -12,6 +12,10 @@ export interface MovementParams {
   steerRate: number;
   /** Во сколько раз доворот быстрее на месте (1 + boost при нулевой скорости). */
   steerLowSpeedBoost: number;
+  /** Инерция вращения: время раскрутки носа до максимальной угловой скорости без груза, с. */
+  steerSpinUpTime: number;
+  /** Мягкость подхода носа к цели: угловая скорость = угол до цели / settleTime, с. */
+  steerSettleTime: number;
   /** Тяга по носу умножается на cos(угол нос→стик)^power: разворачиваясь, нос не толкает не туда. */
   thrustAlignmentPower: number;
 
@@ -43,6 +47,8 @@ export interface MovementState {
   vel: Vec2;
   /** Направление носа (рад). Спрайт смотрит сюда; в заносе скорость отстаёт от носа. */
   heading: number;
+  /** Угловая скорость носа, рад/с. Даёт повороту инерцию. */
+  turnVel: number;
   /** Сила заноса 0..1 на последнем шаге — для отладки и будущих эффектов. */
   drift: number;
   /** Идёт торможение задним сектором. */
@@ -52,6 +58,7 @@ export interface MovementState {
 export const createMovementState = (heading = 0): MovementState => ({
   vel: { x: 0, y: 0 },
   heading,
+  turnVel: 0,
   drift: 0,
   braking: false,
 });
@@ -89,6 +96,20 @@ export const thrustFor = (p: MovementParams): number => (p.baseMass * p.maxSpeed
  */
 export const isRearSector = (heading: number, inputAngle: number, p: MovementParams): boolean =>
   Math.abs(angleDelta(heading, inputAngle)) > Math.PI - (p.rearSectorDeg * DEG) / 2;
+
+/**
+ * Поворот носа с инерцией: желаемая угловая скорость пропорциональна углу до цели (мягкий подход)
+ * и ограничена maxRate, а фактическая угловая скорость меняется не быстрее angularAccel.
+ * Желаемая скорость не больше √(2·α·угол) — нос успевает затормозить и не проскакивает цель.
+ */
+const turnNose = (state: MovementState, delta: number, maxRate: number, angularAccel: number, settle: number, dt: number) => {
+  const brakingLimit = Math.sqrt(2 * angularAccel * Math.abs(delta));
+  const limit = Math.min(maxRate, brakingLimit);
+  const desired = clamp(delta / Math.max(settle, 1e-3), -limit, limit);
+  const dv = desired - state.turnVel;
+  state.turnVel += clamp(dv, -angularAccel * dt, angularAccel * dt);
+  state.heading += state.turnVel * dt;
+};
 
 /** Уменьшить модуль вектора на amount, не переходя через ноль. */
 const shrink = (v: Vec2, amount: number): void => {
@@ -131,12 +152,14 @@ export const stepMovement = (
   state.drift = 0;
   state.braking = false;
 
+  // Предел угловой скорости и углового ускорения носа. Груз делает поворот ленивее.
+  const maxTurnRate = (p.steerRate * (1 + p.steerLowSpeedBoost * (1 - speedRatio))) / handling;
+  const angularAccel = p.steerRate / Math.max(p.steerSpinUpTime, 1e-3) / handling;
+
   if (strength === 0) {
     shrink(v, dragDecel(speedBefore, p) * dt);
-    if (length(v) > 0.3) {
-      const d = angleDelta(state.heading, Math.atan2(v.y, v.x));
-      state.heading += d * (1 - Math.exp(-p.coastAlignRate * dt));
-    }
+    const toVelocity = length(v) > 0.3 ? angleDelta(state.heading, Math.atan2(v.y, v.x)) : 0;
+    turnNose(state, toVelocity, p.coastAlignRate * Math.abs(toVelocity), angularAccel, p.steerSettleTime, dt);
     return;
   }
 
@@ -149,6 +172,7 @@ export const stepMovement = (
     state.braking = true;
     const brake = (p.maxSpeed / p.brakeTime / massFactor) * strength + dragDecel(speedBefore, p);
     shrink(v, brake * dt);
+    turnNose(state, 0, maxTurnRate, angularAccel, p.steerSettleTime, dt); // гасим остаток вращения
     return;
   }
 
@@ -163,26 +187,39 @@ export const stepMovement = (
   // Нос доворачивает к стику; в заносе — с перекрутом внутрь поворота.
   const turnSign = Math.sign(angleDelta(velAngle, target)) || 1;
   const noseTarget = target + turnSign * p.driftOverrotateDeg * DEG * state.drift;
-  const omega = (p.steerRate * (1 + p.steerLowSpeedBoost * (1 - speedRatio))) / handling;
-  state.heading += clamp(angleDelta(state.heading, noseTarget), -omega * dt, omega * dt);
+  turnNose(state, angleDelta(state.heading, noseTarget), maxTurnRate, angularAccel, p.steerSettleTime, dt);
 
   const hx = Math.cos(state.heading);
   const hy = Math.sin(state.heading);
 
-  // Тяга по носу, только когда нос смотрит примерно на стик.
+  // Тяга слабеет, пока нос не смотрит на стик. На скорости она идёт по носу (занос), а на месте — к стику:
+  // иначе медленно разворачивающийся нос подбрасывает существо вбок дугой.
   const noseToStick = Math.abs(angleDelta(state.heading, target));
   const alignment = Math.pow(Math.max(0, Math.cos(noseToStick)), p.thrustAlignmentPower);
   const accel = (thrustFor(p) / mass) * strength * alignment;
-  v.x += hx * accel * dt;
-  v.y += hy * accel * dt;
+  const ux = Math.cos(target);
+  const uy = Math.sin(target);
+  v.x += (ux + (hx - ux) * speedRatio) * accel * dt;
+  v.y += (uy + (hy - uy) * speedRatio) * accel * dt;
 
-  // Скольжение вбок относительно носа гасится сцеплением; в заносе сцепление слабое.
+  // Скольжение вбок гасится сцеплением; в заносе сцепление слабое. Ось сцепления, как и тяга,
+  // на скорости — нос, на месте — стик: разворачивающийся нос не должен уводить существо в сторону.
   const grip = (p.grip * (1 - state.drift * (1 - p.driftGrip))) / handling;
-  const par = v.x * hx + v.y * hy;
-  const perp = { x: v.x - hx * par, y: v.y - hy * par };
+  let gx = ux + (hx - ux) * speedRatio;
+  let gy = uy + (hy - uy) * speedRatio;
+  const gl = Math.hypot(gx, gy);
+  if (gl < 1e-3) {
+    gx = hx;
+    gy = hy;
+  } else {
+    gx /= gl;
+    gy /= gl;
+  }
+  const par = v.x * gx + v.y * gy;
+  const perp = { x: v.x - gx * par, y: v.y - gy * par };
   shrink(perp, dragDecel(length(perp), p) * grip * dt);
-  v.x = hx * par + perp.x;
-  v.y = hy * par + perp.y;
+  v.x = gx * par + perp.x;
+  v.y = gy * par + perp.y;
 
   // Ограничение скорости. Если уже быстрее лимита (стик отпустили наполовину) — плавно тормозим до него.
   const cap = p.analogSpeedCap ? p.maxSpeed * strength : p.maxSpeed;

@@ -1,5 +1,7 @@
 // Стартовые параметры (Приложение A GDD). Объект мутабельный — его правит панель тюнинга.
 
+import type { ObjectClass, ObjectClassDef } from '../collect/memoryObject';
+import type { ScoopParams } from '../collect/scoop';
 import type { MovementParams } from '../player/movement';
 
 export const CELL = 2; // размер клетки, ед.
@@ -15,14 +17,17 @@ export const movementConfig: MovementParams = {
   analogSpeedCap: true,
   baseMass: 1,
   // Поворот и занос «заднеприводной машины». Подобрано симуляцией (см. movement.test.ts):
-  // 180° на полной скорости — тормоз, пронос ~0.7 ед.; 90° на полной — занос, пронос ~2 ед.; на малой — точно.
+  // 180° на полной скорости — тормоз, тяжёлый разворот, назад на 90% скорости за ~0.9 с, пронос ~1 ед.;
+  // 90° на полной — занос, пронос ~2.3 ед.; на малой — точно.
   steerRate: 7, // рад/с, доворот носа на полной скорости
-  steerLowSpeedBoost: 2, // на месте доворот в 1 + 2 = 3 раза быстрее
+  steerLowSpeedBoost: 1, // на месте доворот до 1 + 1 = 2 раз быстрее
+  steerSpinUpTime: 0.15, // с, раскрутка носа до steerRate — инерция вращения, «вес»
+  steerSettleTime: 0.1, // с, мягкость подхода носа к цели
   thrustAlignmentPower: 1, // тяга × cos(нос→стик)^power
   rearSectorDeg: 90, // задняя четверть стика — тормоз
-  brakeTime: 0.35, // с, с максимума до нуля без груза
-  brakeMinSpeed: 1, // ед./с, ниже — разворот на месте
-  grip: 3, // сцепление вбок
+  brakeTime: 0.45, // с, с максимума до нуля без груза
+  brakeMinSpeed: 1.2, // ед./с, ниже — разворот на месте (ещё скользя вперёд)
+  grip: 3.5, // сцепление вбок
   driftGrip: 0.3, // сцепление в полном заносе, доля от grip
   driftSpeedStart: 0.55, // доля maxSpeed, с которой начинается занос
   driftTurnStartDeg: 35, // резкость поворота, с которой начинается срыв (полный — на 90°)
@@ -32,8 +37,28 @@ export const movementConfig: MovementParams = {
 };
 
 export const cargoConfig = {
-  cargo: 0,
-  cargoMax: 10,
+  cargoMax: 10, // стартовый лимит груза (§11)
+};
+
+export const collectConfig = {
+  scoop: {
+    width: 1.2, // ед., поперёк движения (Приложение A)
+    depth: 0.6, // ед., вдоль движения (Приложение A)
+    offset: 0.3, // ед., от центра игрока до заднего края ковша
+    followNose: false, // решение этапа 2: ковш по скорости — полоса всегда во всю ширину, занос = инструмент
+    noseBlendSpeed: 1.2, // ед./с, ниже — ковш плавно переходит на нос
+    turnRate: 18, // 1/с, сглаживание поворота ковша
+  } satisfies ScoopParams,
+  /** §7: размер большей стороны в диаметрах игрока и базовая ценность. */
+  classes: {
+    small: { size: 2, value: 1 },
+    medium: { size: 4, value: 3 },
+    large: { size: 7, value: 6 },
+  } satisfies Record<ObjectClass, ObjectClassDef>,
+  /** Разрешение маски: 64 px на small (2 ед.) → 32 px/ед., крупные пропорционально (§6.3). */
+  maskPixelsPerUnit: 32,
+  /** Сколько стёртых пикселей за шаг физики превращать в частицы. */
+  particlesPerStep: 6,
 };
 
 export const stickConfig = {
@@ -54,6 +79,8 @@ export const cameraConfig = {
 };
 
 export const debugConfig = {
+  /** Вся отладка (панель тюнинга и отладочные элементы в сцене). Переключается клавишей G. */
+  visible: true,
   /** Круг зон стика вокруг игрока: зона поворота, задний сектор-тормоз, ввод и скорость. */
   showStickZones: true,
 };

@@ -119,6 +119,28 @@ describe('задний сектор — тормоз', () => {
     expect(s.vel.x).toBeLessThan(-5);
   });
 
+  it('разворот тяжёлый: назад на 90% скорости не быстрее ~0.75 с', () => {
+    const s = cruising(6);
+    let t90 = -1;
+    for (let t = 0; t < 3 && t90 < 0; t += dt) {
+      stepMovement(s, { x: -1, y: 0 }, 1, params, dt);
+      if (s.vel.x < -5.4) t90 = t;
+    }
+    expect(t90).toBeGreaterThan(0.75);
+    expect(t90).toBeLessThan(1.3);
+  });
+
+  it('нос с инерцией не проскакивает цель', () => {
+    const s = createMovementState(0);
+    let maxHeading = 0;
+    for (let t = 0; t < 2; t += dt) {
+      stepMovement(s, { x: -1, y: 0 }, 1, params, dt);
+      maxHeading = Math.max(maxHeading, s.heading);
+    }
+    expect(maxHeading).toBeLessThan(Math.PI * 1.05);
+    expect(s.heading).toBeCloseTo(Math.PI, 2);
+  });
+
   it('поворот на 90° — не тормоз', () => {
     expect(simulate(cruising(6), { x: 0, y: 1 }, 1, 1).sawBraking).toBe(false);
   });
@@ -149,7 +171,7 @@ describe('занос', () => {
   it('на малой скорости поворот точный, без заноса', () => {
     const trace = simulate(cruising(2.5), { x: 0, y: 1 }, 1, 1.5);
     expect(trace.sawDrift).toBe(false);
-    expect(trace.maxX).toBeLessThan(0.6);
+    expect(trace.maxX).toBeLessThan(0.9); // немного проносит — инерция вращения, «вес»
   });
 
   it('с грузом занос шире', () => {

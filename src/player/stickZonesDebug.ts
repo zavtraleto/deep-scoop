@@ -58,7 +58,7 @@ export class StickZonesDebug {
   }
 
   update(x: number, y: number, heading: number, input: Vec2, vel: Vec2, braking: boolean, drift: number): void {
-    this.group.visible = debugConfig.showStickZones;
+    this.group.visible = debugConfig.visible && debugConfig.showStickZones;
     if (!this.group.visible) return;
     if (movementConfig.rearSectorDeg !== this.builtRearDeg) this.rebuild(movementConfig.rearSectorDeg);
 
