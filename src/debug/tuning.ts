@@ -4,6 +4,9 @@ import {
   cargoConfig,
   collectConfig,
   debugConfig,
+  enemyConfig,
+  enemyLook,
+  mapConfig,
   mouseConfig,
   movementConfig,
   stickConfig,
@@ -12,7 +15,7 @@ import {
 
 // Меняй версию, когда смысл или значения по умолчанию параметров меняются так, что старые сохранения вредны.
 // Новые поля добавлять можно без смены версии: mergeInto переносит только известные поля.
-const STORAGE_KEY = 'memory-dive:tuning:v5'; // v5: радиус эха 100 ед.
+const STORAGE_KEY = 'memory-dive:tuning:v8'; // v8: крупные точки карты
 const groups = {
   movement: movementConfig,
   vision: visionConfig,
@@ -21,6 +24,9 @@ const groups = {
   stick: stickConfig,
   mouse: mouseConfig,
   camera: cameraConfig,
+  enemy: enemyConfig,
+  enemyLook,
+  map: mapConfig,
   debug: debugConfig,
 };
 const defaults = structuredClone(groups);
@@ -74,7 +80,7 @@ export interface TuningStats {
 /** Состояние забега, которое удобно крутить руками. В localStorage не сохраняется. */
 export interface TuningRun {
   cargo: number;
-  /** Вернуть уровень в начальное состояние: объекты, груз, осколки, изведанное, игрок на старте. */
+  /** Вернуть уровень в начальное состояние: объекты, груз, изведанное, враги, игрок на старте. */
   resetLevel: () => void;
 }
 
@@ -120,6 +126,40 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   gui.add(debugConfig, 'showStickZones').name('👁 зоны стика у игрока');
   gui.add(debugConfig, 'showLayout').name('👁 раскладка чанка');
   gui.add(debugConfig, 'fog').name('👁 туман');
+  gui.add(debugConfig, 'showEnemies').name('👁 враги: всегда видны, путь и цель');
+  gui.add(debugConfig, 'immortal').name('бессмертие');
+
+  const mp = gui.addFolder('Карта');
+  mp.add(mapConfig, 'show').name('показывать');
+  mp.add(mapConfig, 'scale', 1, 12, 0.1).name('масштаб (× экрана)');
+  mp.add(mapConfig, 'radius', 0, 400, 1).name('развёртка (точки): радиус, ед.');
+  mp.add(mapConfig, 'lineWidth', 0.5, 4, 0.1).name('толщина линий, px');
+  mp.add(mapConfig, 'opacity', 0, 1, 0.01).name('яркость линий');
+  mp.add(mapConfig, 'centerOpacity', 0, 1, 0.01).name('яркость у персонажа (доля)');
+  mp.add(mapConfig, 'clearRadius', 0, 0.5, 0.01).name('прозрачный центр (доля экрана)');
+  mp.add(mapConfig, 'fullRadius', 0, 1, 0.01).name('полная яркость с (доля экрана)');
+  mp.add(mapConfig, 'flashTime', 0, 3, 0.05).name('вспышка, с');
+  mp.add(mapConfig, 'blipSize', 1, 40, 0.5).name('точки: размер, px');
+  mp.addColor(mapConfig, 'itemColor').name('точки: предметы');
+  mp.addColor(mapConfig, 'enemyColor').name('точки: враги');
+  mp.add(mapConfig, 'enemyLife', 0.5, 15, 0.1).name('точка врага гаснет, с');
+
+  const en = gui.addFolder('Враги');
+  en.add(enemyConfig.kinds.hunter, 'speed', 0.5, 12, 0.1).name('Hunter: скорость, ед./с');
+  en.add(enemyConfig, 'accelTime', 0.05, 3, 0.05).name('разгон, с');
+  en.add(enemyConfig, 'turnRate', 0.5, 20, 0.5).name('поворот тела, рад/с');
+  en.add(enemyConfig, 'slowRadius', 0.5, 10, 0.1).name('тормозит у цели с, ед.');
+  en.add(enemyConfig, 'arriveRadius', 0.2, 3, 0.05).name('пришёл, ед.');
+  en.add(enemyConfig, 'repathInterval', 0.05, 2, 0.05).name('пересчёт пути, с');
+  en.add(enemyConfig, 'pulseHearRadius', 0, 200, 1).name('пульс слышен (сквозь стены), ед.');
+  en.add(enemyConfig, 'sightRadius', 0, 40, 0.5).name('видит по прямой, ед.');
+  en.add(enemyConfig, 'noiseRadius', 0, 60, 0.5).name('шум слышен, ед.');
+  en.add(enemyConfig, 'noiseInterval', 0.05, 3, 0.05).name('шум выдаёт раз в, с');
+  en.add(enemyConfig, 'noiseSpeedBonus', 0, 1, 0.05).name('ускорение при шуме');
+  en.add(enemyConfig, 'cargoThreshold', 0, 1, 0.05).name('груз: порог');
+  en.add(enemyConfig, 'cargoDetectScale', 1, 3, 0.05).name('груз: радиусы ×');
+  en.add(enemyLook, 'markerTime', 0.2, 10, 0.1).name('маркер гаснет, с');
+  en.add(enemyLook, 'deathTime', 0.1, 1, 0.05).name('смерть, с');
 
   const v = gui.addFolder('Свет и эхо');
   const li = visionConfig.light;
@@ -138,10 +178,7 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   v.add(ec, 'radius', 2, 150, 0.5).name('эхо: радиус, ед.');
   v.add(ec, 'speed', 2, 100, 1).name('эхо: скорость кольца, ед./с');
   v.add(ec, 'glow', 0.1, 6, 0.05).name('эхо: свечение, с');
-  v.add(ec, 'shardBoost', 0, 2, 0.05).name('осколок приближает эхо, с');
-  const sh = visionConfig.shards;
-  v.add(sh, 'magnetRadius', 0, 4, 0.05).name('осколки: магнит, ед.');
-  v.add(sh, 'magnetAccel', 1, 120, 1).name('осколки: сила магнита');
+
   const fg = visionConfig.fog;
   v.add(fg, 'unknownDarkness', 0, 1, 0.01).name('туман: неизвестное');
   v.add(fg, 'memoryBrightness', 0, 1.5, 0.01).name('память: яркость');

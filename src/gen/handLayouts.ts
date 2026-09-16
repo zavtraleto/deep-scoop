@@ -17,7 +17,6 @@ const link = (a: string, b: string, width: number, opts: { offset?: number; jog?
  * залы разной формы и размера, смещённые в слотах (ходы разной длины), часть ходов с изломом,
  * параллельные ходы, острова и колонны в залах. Из полного графа соседей убрано ~14% рёбер —
  * у залов по 2–5 выходов, мостов нет (проверяется тестом).
- * Номера ходов важны: на них ссылаются кластеры осколков.
  */
 export const stage3Layout = (): ChunkLayout => ({
   slotsX: 4,
@@ -64,7 +63,7 @@ export const stage3Layout = (): ChunkLayout => ({
     // Ряд 5
     blob(0, 5, 7, 6, { ox: 2, oy: 3, objects: ['small'] }),
     blob(1, 5, 10, 10, { ox: 1, oy: 1, islands: [{ x: 4, y: 4, w: 3, h: 2 }], objects: [{ cls: 'medium', dx: 0, dy: -3 }] }),
-    blob(2, 5, 6, 9, { ox: 3, oy: 2 }),
+    blob(2, 5, 6, 9, { ox: 3, oy: 2, enemies: ['hunter'] }),
     blob(3, 5, 9, 8, { ox: 2, oy: 2, objects: ['medium', 'small'] }),
   ],
   corridors: [
@@ -110,16 +109,5 @@ export const stage3Layout = (): ChunkLayout => ({
     link('r05', 'r15', 3),
     link('r15', 'r25', 3),
     link('r25', 'r35', 2, { jog: 3 }),
-  ],
-  shards: [
-    { at: { corridor: 4 }, count: 4 },
-    { at: { corridor: 10 }, count: 5 },
-    { at: { room: 'r22', edge: 'left' }, count: 5 },
-    { at: { corridor: 15 }, count: 6 },
-    { at: { corridor: 22 }, count: 7 },
-    { at: { room: 'r24', edge: 'bottom' }, count: 5 },
-    { at: { room: 'r15', edge: 'left' }, count: 6 },
-    { at: { corridor: 28 }, count: 4 },
-    { at: { room: 'r33', edge: 'right' }, count: 4 },
   ],
 });

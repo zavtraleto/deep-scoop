@@ -77,6 +77,7 @@ export const validateLayout = (layout: ChunkLayout): string[] => {
       }
     }
     if ((r.objects?.length ?? 0) > 2) problems.push(`В комнате ${r.id} больше двух объектов`);
+    if (r.kind === 'base' && (r.enemies?.length ?? 0) > 0) problems.push('В базе не бывает врагов (§4.7)');
   }
 
   const index = new Map(layout.rooms.map((r, i) => [r.id, i]));

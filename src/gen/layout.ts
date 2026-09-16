@@ -1,4 +1,5 @@
 import type { ObjectClass } from '../collect/memoryObject';
+import type { EnemyKind } from '../enemies/enemy';
 
 /**
  * Раскладка чанка (§4.2–4.3, решения пользователя: чанки и залы крупнее, форма и размеры разные,
@@ -19,8 +20,11 @@ export type RoomKind = 'room' | 'base';
 /** rect — прямоугольный зал; blob — неровный «пещерный» эллипс, форма зависит от id. */
 export type RoomShape = 'rect' | 'blob';
 
-/** Объект в зале. dx, dy — смещение от центра зала в клетках (y вниз); по умолчанию — авторасстановка. */
-export type ObjectSpec = ObjectClass | { cls: ObjectClass; dx: number; dy: number };
+/**
+ * Объект в зале. dx, dy — смещение от центра зала в клетках (y вниз); без них — авторасстановка.
+ * art — имя картинки из папки класса (без расширения); без него картинка выбирается по месту.
+ */
+export type ObjectSpec = ObjectClass | { cls: ObjectClass; dx?: number; dy?: number; art?: string };
 
 export interface RoomSpec {
   id: string;
@@ -34,6 +38,8 @@ export interface RoomSpec {
   islands?: CellRect[];
   /** Какие Memory Objects поставить в зал (0–2, §7). */
   objects?: ObjectSpec[];
+  /** Враги, которые появляются в зале (этап 4). В базе врагов не бывает (§4.7). */
+  enemies?: EnemyKind[];
 }
 
 export interface CorridorSpec {
@@ -47,23 +53,12 @@ export interface CorridorSpec {
   jog?: number;
 }
 
-export type ShardAnchor =
-  | { corridor: number }
-  | { room: string; edge: 'top' | 'bottom' | 'left' | 'right' };
-
-/** Кластер осколков (§8): в ходе или вдоль края зала. */
-export interface ShardCluster {
-  at: ShardAnchor;
-  count: number;
-}
-
 export interface ChunkLayout {
   slotsX: number;
   slotsY: number;
   slotSize: number;
   rooms: RoomSpec[];
   corridors: CorridorSpec[];
-  shards: ShardCluster[];
 }
 
 export const chunkSize = (l: ChunkLayout) => ({ w: l.slotsX * l.slotSize, h: l.slotsY * l.slotSize });
@@ -80,7 +75,14 @@ export const slotRoom = (
   sy: number,
   w: number,
   h: number,
-  opts: { ox?: number; oy?: number; shape?: RoomShape; islands?: CellRect[]; objects?: ObjectSpec[] } = {},
+  opts: {
+    ox?: number;
+    oy?: number;
+    shape?: RoomShape;
+    islands?: CellRect[];
+    objects?: ObjectSpec[];
+    enemies?: EnemyKind[];
+  } = {},
 ): RoomSpec => ({
   id: `r${sx}${sy}`,
   kind: 'room',
@@ -94,6 +96,7 @@ export const slotRoom = (
   slot: { sx, sy },
   islands: opts.islands,
   objects: opts.objects,
+  enemies: opts.enemies,
 });
 
 /** База (§4.7): весь ряд слотов sy одной широкой комнатой высотой h. */

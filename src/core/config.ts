@@ -4,8 +4,8 @@ import type { FloatParams } from '../collect/floatPhysics';
 import type { FractureParams } from '../collect/fracture';
 import type { ObjectClass, ObjectClassDef } from '../collect/memoryObject';
 import type { EchoParams } from '../echo/echoPulse';
+import type { EnemyParams } from '../enemies/enemySystem';
 import type { LightLook, LightParams } from '../echo/light';
-import type { ShardParams } from '../echo/shards';
 import type { ScoopParams } from '../collect/scoop';
 import type { MovementParams } from '../player/movement';
 
@@ -93,7 +93,7 @@ export const collectConfig = {
   particlesPerStep: 6,
 };
 
-/** Видимость (§9, решения этапа 3): свет игрока, эхо, осколки, туман. */
+/** Видимость (§9, решения этапа 3): свет игрока, эхо, туман. */
 export const visionConfig = {
   light: {
     radius: 2 * CELL, // ед., круг света — 2 клетки
@@ -114,14 +114,8 @@ export const visionConfig = {
     radius: 100, // ед. (50 клеток) — решение пользователя, в Приложении A было 8 клеток
     speed: 20 * CELL, // ед./с, 20 клеток/с
     glow: 1.5, // с, свечение Echo-клеток
-    shardBoost: 0.3, // с, осколок приближает импульс; переполнение — импульс сразу, остаток сгорает
     // Решение пользователя: эхо не проходит сквозь стены (в отличие от §16).
   } satisfies EchoParams,
-  shards: {
-    magnetRadius: 1.0, // ед., лёгкий магнит
-    magnetAccel: 30, // ед./с²
-    pickupRadius: 0.4, // ед.
-  } satisfies ShardParams,
   /** Как часто свет отмечает клетки увиденными, Гц. */
   exploreRate: 20,
   fog: {
@@ -159,6 +153,60 @@ export const cameraConfig = {
   leadRate: 3, // 1/с, сглаживание самого опережения
 };
 
+/**
+ * Враги (этап 4, спецификация пользователя): позицию игрока узнают только из событий —
+ * пульс (сквозь стены), шум сбора, прямая видимость вблизи.
+ */
+export const enemyConfig: EnemyParams = {
+  radius: 0.7, // ед., чуть крупнее игрока (решение пользователя)
+  accelTime: 0.6, // с, «существо с инерцией»
+  turnRate: 5, // рад/с
+  arriveRadius: 0.8, // ед.
+  slowRadius: 3, // ед.
+  repathInterval: 0.25, // с, §10.1
+  lookahead: 5, // путевых точек
+  pulseHearRadius: 100, // ед., = радиус эха; слышно сквозь стены (решение пользователя)
+  sightRadius: 10, // ед. (5 клеток), прямая видимость
+  sightInterval: 0.1, // с
+  noiseRadius: 20, // ед. (10 клеток, §10.4)
+  noiseInterval: 0.5, // с
+  noiseSpeedBonus: 0.25, // §10.3
+  cargoThreshold: 0.5, // §11
+  cargoDetectScale: 1.5, // радиусы обнаружения ×1.5 с грузом ≥ 50%
+  moveDirMinSpeed: 0.5, // ед./с
+  alertTime: 0.8, // с
+  kinds: {
+    hunter: { speed: 4.8 }, // ед./с, 80% скорости игрока (§10.6, Chaser)
+  },
+};
+
+export const enemyLook = {
+  /** Маркер последней позиции врага после пульса гаснет за это время, с (§9.3). */
+  markerTime: 3,
+  /** Смерть: анимация до сброса уровня, с (§13: до 1 с). */
+  deathTime: 0.8,
+};
+
+/**
+ * Карта (решения пользователя): во весь экран поверх игры, «двойная экспозиция»; открывается
+ * развёрткой — вторым фронтом импульса эха, дальше и сквозь стены. Точки — как локатор из «Чужого».
+ */
+export const mapConfig = {
+  show: true,
+  scale: 5, // во сколько раз больше мира, чем игровой экран
+  radius: 200, // ед., радиус развёртки (сквозь стены, только точки)
+  lineWidth: 1.2, // px, толщина контуров
+  opacity: 0.4, // яркость контуров у краёв
+  centerOpacity: 0.12, // доля яркости у персонажа
+  clearRadius: 0.06, // доля короткой стороны экрана: у персонажа карта прозрачнее всего
+  fullRadius: 0.45, // доля короткой стороны: отсюда карта в полную силу
+  flashTime: 0.6, // с, вспышка открытого контура и засечённой точки
+  blipSize: 18, // px
+  itemColor: '#5dff8a',
+  enemyColor: '#ff4a5a',
+  enemyLife: 4, // с, точка врага гаснет (≈ до следующего импульса)
+};
+
 export const debugConfig = {
   /** Вся отладка (панель тюнинга и отладочные элементы в сцене). Переключается клавишей G. */
   visible: true,
@@ -168,6 +216,10 @@ export const debugConfig = {
   showLayout: false,
   /** Туман войны. Выключение — чтобы смотреть карту целиком. */
   fog: true,
+  /** Враги видны всегда, с путём, целью и последней известной позицией игрока. */
+  showEnemies: false,
+  /** Касание врага не убивает. */
+  immortal: false,
 };
 
 export const physicsConfig = {

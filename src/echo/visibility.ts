@@ -10,6 +10,8 @@ import { castVisibility, isVisible, lightStrength, type LightParams, type Visibi
 export class VisibilityMap {
   readonly explored: Uint8Array;
   readonly echoUntil: Float32Array;
+  /** Индексы клеток, ставших Explored с прошлого опроса (для мини-карты). Потребитель очищает сам. */
+  readonly fresh: number[] = [];
   /** Порог яркости света, при котором клетка считается увиденной. */
   exploreThreshold = 0.25;
 
@@ -24,6 +26,7 @@ export class VisibilityMap {
   reset(): void {
     this.explored.fill(0);
     this.echoUntil.fill(0);
+    this.fresh.length = 0;
   }
 
   isExplored(cx: number, cy: number): boolean {
@@ -55,6 +58,7 @@ export class VisibilityMap {
           lightStrength(pt.x - o.x, pt.y - o.y, heading, p) >= this.exploreThreshold && isVisible(poly, pt);
         if (cellSeen(poly, x, y, lit)) {
           this.explored[i] = 1;
+          this.fresh.push(i);
           added++;
         }
       }
@@ -80,6 +84,7 @@ export class VisibilityMap {
         if (d <= r0 || d > r1) continue;
         if (!cellSeen(poly, x, y)) continue;
         const i = cy * this.width + cx;
+        if (!this.explored[i]) this.fresh.push(i);
         this.explored[i] = 1;
         this.echoUntil[i] = now + glow;
       }

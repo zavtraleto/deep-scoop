@@ -56,7 +56,6 @@ describe('проверка раскладки §4.4', () => {
       { a: 'r00', b: 'r01', width: 2 },
       { a: 'r10', b: 'r11', width: 2 },
     ],
-    shards: [],
   });
 
   it('кольцо из четырёх комнат валидно', () => {
@@ -101,7 +100,7 @@ describe('ручная карта этапа 3', () => {
     expect(map.grid.get(r02.rect.x + isl.x + 1, r02.rect.y + isl.y + 1)).toBe(Cell.Solid);
   });
 
-  it('растеризуется: старт на базе в пустой клетке, объекты и осколки на полу', () => {
+  it('растеризуется: старт на базе в пустой клетке, объекты на полу', () => {
     const map = buildChunk(stage3Layout());
     expect(map.grid.width).toBe(48);
     expect(map.grid.height).toBe(72);
@@ -110,8 +109,6 @@ describe('ручная карта этапа 3', () => {
     expect(empty(map.spawn)).toBe(true);
     expect(map.objects.length).toBeGreaterThan(10);
     for (const o of map.objects) expect(empty(o.center)).toBe(true);
-    expect(map.shards.length).toBe(stage3Layout().shards.reduce((s, c) => s + c.count, 0));
-    for (const s of map.shards) expect(empty(s)).toBe(true);
   });
 
   it('все комнаты достижимы по клеткам от базы', () => {

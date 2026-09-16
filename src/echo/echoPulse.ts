@@ -12,8 +12,6 @@ export interface EchoParams {
   speed: number;
   /** Сколько клетка светится после прохода кольца, с (1.5). */
   glow: number;
-  /** На сколько осколок приближает ближайший импульс, с (0.3). */
-  shardBoost: number;
 }
 
 export interface EchoRing {
@@ -36,8 +34,7 @@ export const echoVisibility = (origin: Vec2, walls: WallIndex, p: EchoParams): V
 /**
  * Эхо (§9.1): импульс срабатывает сам по таймеру; кольцо расходится от точки, где был игрок,
  * и раскрывает клетки, через которые прошло. Сквозь стены волна не проходит (решение пользователя,
- * отличается от §16): раскрывается только то, что видно из точки импульса. Осколки — тактическая зарядка: приближают ближайший
- * импульс; если заряд переполнился, импульс срабатывает сразу, а остаток сгорает (решение пользователя).
+ * отличается от §16): раскрывается только то, что видно из точки импульса.
  */
 export class EchoPulse {
   /** Сколько секунд осталось до импульса. */
@@ -45,7 +42,6 @@ export class EchoPulse {
   readonly rings: EchoRing[] = [];
   /** Импульсов за последний шаг (для эффектов). */
   firedThisStep = 0;
-  private pendingFire = false;
 
   constructor(private readonly p: EchoParams) {
     this.countdown = p.interval;
@@ -54,7 +50,6 @@ export class EchoPulse {
   reset(): void {
     this.countdown = this.p.interval;
     this.rings.length = 0;
-    this.pendingFire = false;
   }
 
   /** Доля заряда 0..1 — для кольца вокруг игрока. */
@@ -62,18 +57,11 @@ export class EchoPulse {
     return 1 - Math.max(0, this.countdown) / this.p.interval;
   }
 
-  /** Осколок подобран. */
-  boost(count = 1): void {
-    this.countdown -= this.p.shardBoost * count;
-    if (this.countdown <= 0) this.pendingFire = true;
-  }
-
   step(dt: number, player: Vec2, map: VisibilityMap, walls: WallIndex, now: number): void {
     this.firedThisStep = 0;
     this.countdown -= dt;
-    if (this.countdown <= 0 || this.pendingFire) {
-      this.pendingFire = false;
-      this.countdown = this.p.interval; // остаток сгорает
+    if (this.countdown <= 0) {
+      this.countdown = this.p.interval;
       const origin = { ...player };
       this.rings.push({ origin, radius: 0, age: 0, poly: echoVisibility(origin, walls, this.p) });
       this.firedThisStep++;

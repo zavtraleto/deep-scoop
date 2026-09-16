@@ -21,10 +21,21 @@
         touch-action: none;
       }
       #game canvas { display: block; }
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6f7d96;
+        font: 14px system-ui, sans-serif;
+        letter-spacing: 0.1em;
+      }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="loading">погружение…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

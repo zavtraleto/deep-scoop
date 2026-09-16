@@ -105,7 +105,7 @@ export const corridorGeometries = (layout: ChunkLayout): CorridorGeometry[] => {
   });
 };
 
-/** Средняя точка хода (в клетках) — для отладки и кластеров осколков. */
+/** Средняя точка хода (в клетках) — для отладки. */
 export const corridorMid = (g: CorridorGeometry): { x: number; y: number } => {
   const r = g.rects[Math.floor(g.rects.length / 2)];
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };

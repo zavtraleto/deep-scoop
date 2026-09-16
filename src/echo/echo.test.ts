@@ -3,7 +3,6 @@ import { CELL, visionConfig } from '../core/config';
 import { Grid } from '../world/grid';
 import { EchoPulse } from './echoPulse';
 import { castVisibility, isVisible, lightStrength, marchRay } from './light';
-import { ShardField } from './shards';
 import { VisibilityMap } from './visibility';
 
 const light = visionConfig.light;
@@ -89,34 +88,5 @@ describe('эхо', () => {
     const far = Math.ceil(params.radius / CELL) + 2;
     expect(map.isExplored(far, 0)).toBe(false);
     expect(map.isExplored(far - 3, 0)).toBe(true);
-  });
-
-  it('осколок приближает импульс; переполнение — импульс сразу, остаток сгорает', () => {
-    const map = new VisibilityMap(10, 10);
-    const walls = new Grid(10, 10, 0).buildWalls();
-    const echo = new EchoPulse(echoParams);
-    echo.step(0.1, { x: 0, y: 0 }, map, walls, 0);
-    const before = echo.countdown;
-    echo.boost(1);
-    expect(echo.countdown).toBeCloseTo(before - 0.3);
-    echo.boost(20);
-    echo.step(0.01, { x: 0, y: 0 }, map, walls, 0.1);
-    expect(echo.firedThisStep).toBe(1);
-    expect(echo.countdown).toBeCloseTo(echoParams.interval);
-    expect(echo.charge).toBeCloseTo(0);
-  });
-});
-
-describe('осколки', () => {
-  it('магнит подтягивает рядом и подбирает, дальние не трогает', () => {
-    const field = new ShardField([
-      { x: 0.9, y: 0 },
-      { x: 5, y: 0 },
-    ]);
-    let picked = 0;
-    for (let t = 0; t < 1; t += 1 / 120) picked += field.step({ x: 0, y: 0 }, 1 / 120, visionConfig.shards);
-    expect(picked).toBe(1);
-    expect(field.alive).toEqual([false, true]);
-    expect(field.pos[1]).toEqual({ x: 5, y: 0 });
   });
 });

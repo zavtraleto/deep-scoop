@@ -1,4 +1,5 @@
 import type { ObjectClass } from '../collect/memoryObject';
+import type { EnemyKind } from '../enemies/enemy';
 import { CELL } from '../core/config';
 import type { Vec2 } from '../math/vec2';
 import { Cell, Grid } from '../world/grid';
@@ -11,6 +12,10 @@ export interface ObjectPlacement {
   cls: ObjectClass;
   center: Vec2;
   roomId: string;
+  /** Ключ места для детерминированного выбора картинки. */
+  key: string;
+  /** Явно заданная картинка (ручная карта). */
+  art?: string;
 }
 
 /** Готовый чанк: сетка клеток и всё, что нужно расставить в мире (координаты мира). */
@@ -20,11 +25,18 @@ export interface ChunkMap {
   corridors: CorridorGeometry[];
   spawn: Vec2;
   objects: ObjectPlacement[];
-  shards: Vec2[];
+  enemies: EnemyPlacement[];
+  /** Куда врагам нельзя (база, §4.7), клетки чанка. */
+  enemyBlocked: CellRect[];
 }
 
-const SHARD_SPACING = 0.9; // ед. между осколками в кластере
-const SHARD_EDGE_INSET = 1.2; // ед. от края габарита при кластере вдоль края зала
+export interface EnemyPlacement {
+  kind: EnemyKind;
+  pos: Vec2;
+  roomId: string;
+}
+
+const ENEMY_CLEARANCE = 0.8; // ед. свободного пола вокруг точки появления врага
 
 /** Центр прямоугольника клеток в мировых координатах. */
 export const rectCenter = (r: CellRect): Vec2 => ({ x: (r.x + r.w / 2) * CELL, y: -(r.y + r.h / 2) * CELL });
@@ -40,18 +52,31 @@ const onFloor = (grid: Grid, p: Vec2, radius: number): boolean => {
   return true;
 };
 
-/** Сдвигать точку к цели, пока она не встанет на пол (кривой край пещеры, острова). */
-const snapToFloor = (grid: Grid, p: Vec2, toward: Vec2, radius: number): Vec2 => {
-  const dx = toward.x - p.x;
-  const dy = toward.y - p.y;
-  const len = Math.hypot(dx, dy);
-  const steps = Math.ceil(len / 0.25);
-  for (let i = 0; i <= steps; i++) {
-    const t = steps === 0 ? 0 : i / steps;
-    const q = { x: p.x + dx * t, y: p.y + dy * t };
-    if (onFloor(grid, q, radius)) return q;
+/** Ближайшая к p точка пола с запасом radius: обход по расширяющимся кольцам. */
+const nearestFloor = (grid: Grid, p: Vec2, radius: number): Vec2 => {
+  if (onFloor(grid, p, radius)) return p;
+  for (let ring = 1; ring <= 40; ring++) {
+    const r = ring * 0.5;
+    const steps = ring * 8;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const q = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r };
+      if (onFloor(grid, q, radius)) return q;
+    }
   }
   return p;
+};
+
+/** Враги зала: по центру, несколько — по кругу. */
+const placeEnemies = (grid: Grid, room: RoomSpec): EnemyPlacement[] => {
+  const list = room.enemies ?? [];
+  const c = rectCenter(room.rect);
+  return list.map((kind, i) => {
+    const a = (i / list.length) * Math.PI * 2;
+    const off = list.length > 1 ? CELL : 0;
+    const p = { x: c.x + Math.cos(a) * off, y: c.y + Math.sin(a) * off };
+    return { kind, roomId: room.id, pos: nearestFloor(grid, p, ENEMY_CLEARANCE) };
+  });
 };
 
 /**
@@ -64,68 +89,19 @@ const placeObjects = (room: RoomSpec): ObjectPlacement[] => {
   const horizontal = room.rect.w >= room.rect.h;
   const quarter = ((horizontal ? room.rect.w : room.rect.h) * CELL) / 4;
   return list.map((o, i) => {
-    if (typeof o !== 'string') return { cls: o.cls, roomId: room.id, center: { x: c.x + o.dx * CELL, y: c.y - o.dy * CELL } };
-    if (list.length === 1) return { cls: o, roomId: room.id, center: c };
-    const sign = i === 0 ? -1 : 1;
-    return {
+    const base = {
       cls: objectClass(o),
       roomId: room.id,
-      center: horizontal ? { x: c.x + sign * quarter, y: c.y } : { x: c.x, y: c.y - sign * quarter },
+      key: `${room.id}#${i}`,
+      art: typeof o === 'string' ? undefined : o.art,
     };
-  });
-};
-
-/** Точки вдоль отрезка from→to, по центру, с шагом не больше SHARD_SPACING и лёгким зигзагом поперёк. */
-const lineCluster = (from: Vec2, to: Vec2, count: number, zigzag: number): Vec2[] => {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const len = Math.hypot(dx, dy);
-  const step = Math.min(SHARD_SPACING, len / (count + 1));
-  const nx = -dy / (len || 1);
-  const ny = dx / (len || 1);
-  const start = len / 2 - (step * (count - 1)) / 2;
-  return Array.from({ length: count }, (_, i) => {
-    const t = (start + step * i) / (len || 1);
-    const z = (i % 2 === 0 ? 1 : -1) * zigzag;
-    return { x: from.x + dx * t + nx * z, y: from.y + dy * t + ny * z };
-  });
-};
-
-const placeShards = (layout: ChunkLayout, grid: Grid, corridors: CorridorGeometry[], rooms: Map<string, RoomSpec>): Vec2[] => {
-  const out: Vec2[] = [];
-  for (const cluster of layout.shards) {
-    if ('corridor' in cluster.at) {
-      const g = corridors[cluster.at.corridor];
-      if (!g) throw new Error(`Кластер осколков: нет хода №${cluster.at.corridor}`);
-      // Кластер — вдоль самого длинного отрезка хода.
-      const r = g.rects.reduce((best, cur) =>
-        (g.axis === 'horizontal' ? cur.w > best.w : cur.h > best.h) ? cur : best,
-      );
-      const c = rectCenter(r);
-      const half = ((g.axis === 'horizontal' ? r.w : r.h) * CELL) / 2;
-      const from = g.axis === 'horizontal' ? { x: c.x - half, y: c.y } : { x: c.x, y: c.y + half };
-      const to = g.axis === 'horizontal' ? { x: c.x + half, y: c.y } : { x: c.x, y: c.y - half };
-      out.push(...lineCluster(from, to, cluster.count, 0.25));
-      continue;
+    if (typeof o !== 'string' && (o.dx !== undefined || o.dy !== undefined)) {
+      return { ...base, center: { x: c.x + (o.dx ?? 0) * CELL, y: c.y - (o.dy ?? 0) * CELL } };
     }
-    const room = rooms.get(cluster.at.room);
-    if (!room) throw new Error(`Кластер осколков: нет зала ${cluster.at.room}`);
-    const { x, y, w, h } = room.rect;
-    const left = x * CELL + SHARD_EDGE_INSET;
-    const right = (x + w) * CELL - SHARD_EDGE_INSET;
-    const top = -y * CELL - SHARD_EDGE_INSET;
-    const bottom = -(y + h) * CELL + SHARD_EDGE_INSET;
-    const edge = {
-      top: [{ x: left, y: top }, { x: right, y: top }],
-      bottom: [{ x: left, y: bottom }, { x: right, y: bottom }],
-      left: [{ x: left, y: top }, { x: left, y: bottom }],
-      right: [{ x: right, y: top }, { x: right, y: bottom }],
-    }[cluster.at.edge];
-    // У неровного зала край габарита может быть в скале: сдвигаем осколки к центру до пола.
-    const center = rectCenter(room.rect);
-    out.push(...lineCluster(edge[0], edge[1], cluster.count, 0).map((p) => snapToFloor(grid, p, center, 0.3)));
-  }
-  return out;
+    if (list.length === 1) return { ...base, center: c };
+    const sign = i === 0 ? -1 : 1;
+    return { ...base, center: horizontal ? { x: c.x + sign * quarter, y: c.y } : { x: c.x, y: c.y - sign * quarter } };
+  });
 };
 
 /** Раскладка → чанк. Невалидная раскладка — ошибка со списком проблем. */
@@ -188,6 +164,7 @@ export const buildChunk = (layout: ChunkLayout): ChunkMap => {
     corridors,
     spawn: rectCenter(base.rect),
     objects: layout.rooms.flatMap(placeObjects),
-    shards: placeShards(layout, grid, corridors, rooms),
+    enemies: layout.rooms.flatMap((r) => placeEnemies(grid, r)),
+    enemyBlocked: layout.rooms.filter((r) => r.kind === 'base').map((r) => r.rect),
   };
 };

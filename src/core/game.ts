@@ -1,11 +1,23 @@
 import * as THREE from 'three';
-import { cargoConfig, collectConfig, movementConfig, physicsConfig, PLAYER_RADIUS, visionConfig } from './config';
+import {
+  cargoConfig,
+  collectConfig,
+  debugConfig,
+  enemyConfig,
+  enemyLook,
+  mapConfig,
+  movementConfig,
+  physicsConfig,
+  PLAYER_RADIUS,
+  visionConfig,
+} from './config';
 import { CollectWorld } from '../collect/collectWorld';
 import type { Cargo } from '../collect/collector';
 import { EraseParticles } from '../collect/eraseParticles';
 import type { MemoryObject, ObjectSample } from '../collect/memoryObject';
 import { MemoryObjectView } from '../collect/memoryObjectView';
-import { buildTelevision, type ObjectArt } from '../collect/objectArt';
+import { pickArt } from '../collect/artLibrary';
+import { buildObject, type CanvasArt, type CanvasArtLibrary, type ObjectArt } from '../collect/objectArt';
 import { createScoopState, type ScoopState } from '../collect/scoop';
 import { ScoopView } from '../collect/scoopView';
 import { FpsMeter } from '../debug/fpsMeter';
@@ -15,13 +27,17 @@ import { angleDelta, clamp, length, type Vec2 } from '../math/vec2';
 import { EchoPulse } from '../echo/echoPulse';
 import { EchoView } from '../echo/echoView';
 import { FogView } from '../echo/fogView';
-import { castVisibility } from '../echo/light';
+import { castVisibility, isVisible } from '../echo/light';
+import { EnemyDebug } from '../enemies/enemyDebug';
+import { EnemySystem } from '../enemies/enemySystem';
+import { EnemyView } from '../enemies/enemyView';
+import { enemyGrid, NavGrid } from '../enemies/navGrid';
+import { MapKnowledge, type Tracked } from '../minimap/mapKnowledge';
+import { MinimapView } from '../minimap/minimapView';
 import { LightGlowView } from '../echo/lightGlowView';
 import { LightMaskView } from '../echo/lightMaskView';
 import { MEMORY_LAYER, MemoryView } from '../echo/memoryView';
-import { createRecollection, updateRecollection, type Recollection, type Sight } from '../echo/sight';
-import { ShardField } from '../echo/shards';
-import { ShardView } from '../echo/shardView';
+import { createRecollection, pointLit, updateRecollection, type Recollection, type Sight } from '../echo/sight';
 import { VisibilityMap } from '../echo/visibility';
 import { buildChunk, type ObjectPlacement } from '../gen/buildChunk';
 import { stage3Layout } from '../gen/handLayouts';
@@ -58,11 +74,9 @@ export class Game {
   private readonly zonesDebug = new StickZonesDebug();
   private readonly layoutDebug: LayoutDebug;
 
-  // Видимость: свет, эхо, осколки, туман.
+  // Видимость: свет, эхо, туман.
   private readonly vision: VisibilityMap;
   private readonly echo = new EchoPulse(visionConfig.echo);
-  private readonly shards: ShardField;
-  private readonly shardView: ShardView;
   private readonly lightMask = new LightMaskView();
   private readonly fog: FogView;
   private readonly lightGlow: LightGlowView;
@@ -74,10 +88,24 @@ export class Game {
   private readonly spawn: Vec2;
   private readonly drawingBuffer = new THREE.Vector2();
 
+  // Враги (этап 4).
+  private readonly enemies: EnemySystem;
+  private readonly enemyView: EnemyView;
+  private readonly enemyDebug = new EnemyDebug();
+  /** Сколько осталось до сброса после поимки, с; < 0 — игрок жив. */
+  private deathTimer = -1;
+
+  // Карта во весь экран (решение пользователя).
+  private readonly mapKnowledge: MapKnowledge;
+  private readonly minimap: MinimapView;
+  private readonly tracked: Tracked[] = [];
+
   // Сбор и парящие объекты.
   private readonly world = new CollectWorld();
   private readonly placements: ObjectPlacement[];
   private readonly rootArts = new Map<number, RootArt>();
+  /** Одна текстура на картинку: её делят все экземпляры и все куски. */
+  private readonly artTextures = new Map<CanvasArt, THREE.Texture>();
   private readonly views = new Map<MemoryObject, MemoryObjectView>();
   private readonly scoop: ScoopState = createScoopState();
   private prevScoopAngle = 0;
@@ -93,7 +121,10 @@ export class Game {
   private lastTime = -1;
   private time = 0;
 
-  constructor(private readonly container: HTMLElement) {
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly arts: CanvasArtLibrary,
+  ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.append(this.renderer.domElement);
@@ -105,14 +136,21 @@ export class Game {
     worldMesh.traverse((o) => o.layers.enable(MEMORY_LAYER)); // пол и стены есть и в памяти
     this.scene.add(worldMesh);
     this.layoutDebug = new LayoutDebug(map);
-    this.shards = new ShardField(map.shards);
-    this.shardView = new ShardView(this.shards);
     this.vision = new VisibilityMap(map.grid.width, map.grid.height);
     this.fog = new FogView(this.vision, this.lightMask.target.texture, this.memory.texture);
     this.lightGlow = new LightGlowView(this.fog.mesh.geometry, this.lightMask.target.texture);
-    this.scene.add(this.shardView.mesh, this.shardView.ghost, this.fog.mesh, this.lightGlow.mesh, this.echoView.group, this.layoutDebug.group);
+    this.scene.add(this.fog.mesh, this.lightGlow.mesh, this.echoView.group, this.layoutDebug.group);
     this.placements = map.objects;
     this.spawnObjects();
+
+    // Враги ходят по копии карты с закрытой базой, видят — по настоящим стенам.
+    const eg = enemyGrid(map.grid, map.enemyBlocked);
+    this.enemies = new EnemySystem(map.enemies, new NavGrid(eg), eg.buildWalls(), this.walls, enemyConfig);
+    this.enemyView = new EnemyView(this.enemies.enemies, enemyConfig.radius);
+    this.scene.add(this.enemyView.group, this.enemyDebug.lines);
+
+    this.mapKnowledge = new MapKnowledge(this.walls);
+    this.minimap = new MinimapView(this.mapKnowledge);
 
     this.scene.add(this.scoopView.mesh, this.sprite.mesh, this.gauge.mesh, this.particles.points, this.zonesDebug.group);
     // Всё, что про игрока, и отладка рисуются поверх тумана.
@@ -140,10 +178,13 @@ export class Game {
         this.syncObjectViews(); // убрать старые виды, пока их текстуры ещё живы
         this.spawnObjects();
         this.run.cargo = 0;
-        this.shards.reset();
-        this.shardView.reset();
         this.vision.reset();
         this.echo.reset();
+        this.enemies.reset();
+        this.enemyView.clearMarkers();
+        this.mapKnowledge.reset();
+        this.minimap.refreshAll();
+        this.deathTimer = -1;
         Object.assign(this.pos, this.spawn);
         Object.assign(this.prevPos, this.spawn);
         this.move.vel.x = this.move.vel.y = 0;
@@ -163,16 +204,26 @@ export class Game {
   }
 
   private spawnObjects() {
-    for (const r of this.rootArts.values()) r.texture.dispose();
     this.rootArts.clear();
-    for (const { cls, center } of this.placements) {
-      const built = buildTelevision(center, cls, collectConfig.classes, PLAYER_RADIUS * 2, collectConfig.maskPixelsPerUnit);
-      const texture = new THREE.CanvasTexture(built.art.canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 4;
+    for (const { cls, center, key, art } of this.placements) {
+      const source = pickArt(this.arts[cls], key, art);
+      if (!source) continue;
+      const built = buildObject(center, source, collectConfig.classes, PLAYER_RADIUS * 2, collectConfig.maskPixelsPerUnit);
+      const texture = this.artTexture(source);
       this.rootArts.set(built.object.root.id, { art: built.art, texture, totalOpaque: built.object.root.totalOpaque });
       this.world.add(built.object);
     }
+  }
+
+  private artTexture(source: CanvasArt): THREE.Texture {
+    let texture = this.artTextures.get(source);
+    if (!texture) {
+      texture = new THREE.CanvasTexture(source.image);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      this.artTextures.set(source, texture);
+    }
+    return texture;
   }
 
   private resize = () => {
@@ -223,7 +274,6 @@ export class Game {
     };
 
     this.layoutDebug.update();
-    this.shardView.update(this.time, sight);
     this.echoView.update(player, this.echo.charge, this.echo.rings, visionConfig.echo, dt);
     this.syncObjectViews();
     for (const [object, view] of this.views) {
@@ -238,7 +288,22 @@ export class Game {
     this.particles.setViewport(this.container.clientHeight, this.cam.camera.fov);
     this.particles.update(dt, player);
 
+    this.enemyView.update(
+      this.enemies.enemies,
+      (_e, p) => debugConfig.showEnemies || pointLit(p, sight),
+      alpha,
+      this.time,
+      dt,
+      enemyLook.markerTime,
+    );
+    this.enemyDebug.update(this.enemies.enemies, debugConfig.visible && debugConfig.showEnemies, enemyConfig.sightRadius);
+
     this.sprite.update(x, y, heading);
+    // Поимка: существо сжимается и гаснет, потом уровень сбрасывается.
+    const dying = this.deathTimer >= 0 ? 1 - this.deathTimer / enemyLook.deathTime : 0;
+    this.sprite.mesh.scale.x = 1 - dying;
+    this.sprite.mesh.scale.y *= 1 - dying;
+    this.sprite.mesh.rotation.z += dying * dying * 6;
     this.gauge.update(x, y, heading, this.run.cargo / this.run.cargoMax, this.time, dt);
     this.scoopView.update(x, y, scoopAngle, this.erasing, collectConfig.scoop, dt);
     const m = this.move;
@@ -260,6 +325,22 @@ export class Game {
     this.fog.update(this.drawingBuffer, this.time);
     this.lightGlow.update(this.drawingBuffer);
     this.renderer.render(this.scene, this.cam.camera);
+
+    const camPos = this.cam.camera.position;
+    const playerNdc = new THREE.Vector3(x, y, 0).project(this.cam.camera);
+    this.minimap.update({
+      look: mapConfig,
+      now: this.simTime,
+      gameCenter: { x: camPos.x, y: camPos.y },
+      gameHalfH: camPos.z * Math.tan(THREE.MathUtils.degToRad(this.cam.camera.fov) / 2),
+      aspect: this.cam.camera.aspect,
+      player,
+      heading,
+      playerPx: { x: (playerNdc.x * 0.5 + 0.5) * this.drawingBuffer.x, y: (playerNdc.y * 0.5 + 0.5) * this.drawingBuffer.y },
+      buffer: this.drawingBuffer,
+      pixelRatio: this.renderer.getPixelRatio(),
+    });
+    this.minimap.render(this.renderer);
   };
 
   /** Создать и убрать отрисовку по событиям мира: раскол заменяет объект кусками. */
@@ -292,16 +373,61 @@ export class Game {
     samples.length = 0;
   }
 
+  /** Карта: контуры — клетки, увиденные игроком; развёртка сквозь стены — только точки. */
+  private stepMap() {
+    for (const i of this.vision.fresh) this.mapKnowledge.revealCell(i, this.simTime);
+    this.vision.fresh.length = 0;
+    const t = this.tracked;
+    t.length = 0;
+    if (this.mapKnowledge.sweeping > 0) {
+      for (const o of this.world.objects) t.push({ key: o, kind: 'item', pos: o.body.pos });
+      for (const e of this.enemies.enemies) t.push({ key: e, kind: 'enemy', pos: e.pos });
+    }
+    this.mapKnowledge.step(this.simTime, visionConfig.echo.speed, mapConfig.radius, t, mapConfig.enemyLife);
+  }
+
+  private stepEnemies(dt: number, noisy: boolean) {
+    const alive = this.deathTimer < 0;
+    this.enemies.step(dt, {
+      player: this.pos,
+      playerVel: this.move.vel,
+      playerRadius: PLAYER_RADIUS,
+      noisy: alive && noisy,
+      cargoRatio: this.run.cargo / this.run.cargoMax,
+    });
+    // Маркер ставим, только если враг был в поле зрения волны: сквозь стены игрок его не «видит».
+    for (const ping of this.enemies.pings) {
+      if (this.echo.rings.some((r) => isVisible(r.poly, ping.pos))) this.enemyView.mark(ping.pos, enemyLook.markerTime);
+    }
+    this.enemies.pings.length = 0;
+
+    if (alive && this.enemies.caught && !debugConfig.immortal) {
+      this.deathTimer = enemyLook.deathTime;
+      for (let k = 0; k < 40; k++) {
+        const a = Math.random() * Math.PI * 2;
+        const from = { x: this.pos.x + Math.cos(a) * 0.3, y: this.pos.y + Math.sin(a) * 0.3 };
+        this.particles.spawn(from, this.pos, 255, 110, 125, false);
+      }
+    }
+    if (!alive) {
+      this.deathTimer -= dt;
+      if (this.deathTimer <= 0) this.run.resetLevel();
+    }
+  }
+
   private fixedUpdate(dt: number) {
     this.prevPos.x = this.pos.x;
     this.prevPos.y = this.pos.y;
     this.prevHeading = this.move.heading;
     this.prevScoopAngle = this.scoop.angle;
 
-    const input = this.input.vector({
-      player: this.pos,
-      screenToWorld: (u, v) => this.cam.screenToWorld(u, v),
-    });
+    const dying = this.deathTimer >= 0;
+    const input = dying
+      ? { x: 0, y: 0 }
+      : this.input.vector({
+          player: this.pos,
+          screenToWorld: (u, v) => this.cam.screenToWorld(u, v),
+        });
     this.lastInput = input;
     this.run.cargoMax = cargoConfig.cargoMax;
     const mass = massFor(this.run.cargo, this.run.cargoMax, movementConfig.baseMass);
@@ -324,15 +450,13 @@ export class Game {
 
     this.simTime += dt;
     this.echo.step(dt, this.pos, this.vision, this.walls, this.simTime);
-    if (this.echo.firedThisStep) this.echoView.pulse(1);
-    const picked = this.shards.step(this.pos, dt, visionConfig.shards);
-    if (picked > 0) {
-      this.echo.boost(picked);
-      this.echoView.pulse(0.35);
-      for (const i of this.shards.picked) {
-        for (let k = 0; k < 3; k++) this.particles.spawn(this.shards.pos[i], this.pos, 160, 240, 255, true);
-      }
+    if (this.echo.firedThisStep) {
+      this.echoView.pulse(1);
+      this.enemies.pulse(this.pos, this.move.vel, visionConfig.echo.speed);
+      this.mapKnowledge.fire(this.pos, this.simTime);
     }
+    this.stepEnemies(dt, res.noise);
+    this.stepMap();
     this.exploreTimer -= dt;
     if (this.exploreTimer <= 0) {
       this.exploreTimer = 1 / visionConfig.exploreRate;
