@@ -3,6 +3,9 @@
 import type { FloatParams } from '../collect/floatPhysics';
 import type { FractureParams } from '../collect/fracture';
 import type { ObjectClass, ObjectClassDef } from '../collect/memoryObject';
+import type { EchoParams } from '../echo/echoPulse';
+import type { LightLook, LightParams } from '../echo/light';
+import type { ShardParams } from '../echo/shards';
 import type { ScoopParams } from '../collect/scoop';
 import type { MovementParams } from '../player/movement';
 
@@ -90,6 +93,47 @@ export const collectConfig = {
   particlesPerStep: 6,
 };
 
+/** Видимость (§9, решения этапа 3): свет игрока, эхо, осколки, туман. */
+export const visionConfig = {
+  light: {
+    radius: 2 * CELL, // ед., круг света — 2 клетки
+    coneRange: 4 * CELL, // ед., луч вперёд по носу — 4 клетки
+    coneAngleDeg: 60,
+    softness: 0.35, // мягкий край света
+  } satisfies LightParams,
+  /** Вид света: тёплый подводный; ореол вокруг существа тусклее луча-прожектора (решение пользователя). */
+  look: {
+    ambientLevel: 0.5, // ореол рассеивает туман наполовину
+    beamLevel: 1, // прожектор — полностью
+    color: '#ffc861',
+    ambientTint: 0.05,
+    beamTint: 0.14,
+  } satisfies LightLook,
+  echo: {
+    interval: 4, // с
+    radius: 100, // ед. (50 клеток) — решение пользователя, в Приложении A было 8 клеток
+    speed: 20 * CELL, // ед./с, 20 клеток/с
+    glow: 1.5, // с, свечение Echo-клеток
+    shardBoost: 0.3, // с, осколок приближает импульс; переполнение — импульс сразу, остаток сгорает
+    // Решение пользователя: эхо не проходит сквозь стены (в отличие от §16).
+  } satisfies EchoParams,
+  shards: {
+    magnetRadius: 1.0, // ед., лёгкий магнит
+    magnetAccel: 30, // ед./с²
+    pickupRadius: 0.4, // ед.
+  } satisfies ShardParams,
+  /** Как часто свет отмечает клетки увиденными, Гц. */
+  exploreRate: 20,
+  fog: {
+    unknownDarkness: 1, // Unknown — полная темнота
+    // Explored вне света и эха — «мутная память» (решение пользователя).
+    memoryBrightness: 0.55, // яркость памяти
+    memorySaturation: 0.3, // насыщенность памяти (0 — серая)
+    memoryBlur: 2.5, // сила размытия, px половинного разрешения
+    memoryWarp: 0.004, // сила «плывения», доля экрана
+  },
+};
+
 export const stickConfig = {
   radius: 80, // px
   deadZone: 0.1, // доля радиуса
@@ -120,6 +164,10 @@ export const debugConfig = {
   visible: true,
   /** Круг зон стика вокруг игрока: зона поворота, задний сектор-тормоз, ввод и скорость. */
   showStickZones: true,
+  /** Раскладка чанка: границы слотов и граф проходов. */
+  showLayout: false,
+  /** Туман войны. Выключение — чтобы смотреть карту целиком. */
+  fog: true,
 };
 
 export const physicsConfig = {

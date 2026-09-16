@@ -3,13 +3,14 @@ import { CELL } from '../core/config';
 import { Cell, type Grid, type WallIndex } from './grid';
 
 export const palette = {
-  wall: new THREE.Color('#10141d'),
+  // Цвет скалы совпадает с цветом тумана: изведанная и неизведанная скала выглядят одинаково,
+  // и вокруг стен не появляется светлого ореола.
+  wall: new THREE.Color('#0b0e14'),
   floor: new THREE.Color('#252d3d'),
-  gridLine: new THREE.Color('#34405a'),
   wallEdge: new THREE.Color('#8fb3e0'),
 };
 
-/** Пол (все непустые клетки) с процедурной сеткой клеток — чтобы глазом читались скорость и инерция. */
+/** Пол (все непустые клетки) — однотонный: визуал пока простой. */
 const buildFloor = (grid: Grid): THREE.Mesh => {
   const pos: number[] = [];
   const tri = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) =>
@@ -46,35 +47,7 @@ const buildFloor = (grid: Grid): THREE.Mesh => {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uFloor: { value: palette.floor },
-      uLine: { value: palette.gridLine },
-      uCell: { value: CELL },
-    },
-    vertexShader: /* glsl */ `
-      varying vec2 vWorld;
-      void main() {
-        vWorld = position.xy;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uFloor;
-      uniform vec3 uLine;
-      uniform float uCell;
-      varying vec2 vWorld;
-      void main() {
-        vec2 g = vWorld / uCell;
-        vec2 w = fwidth(g);
-        vec2 d = abs(fract(g - 0.5) - 0.5) / w;
-        float line = 1.0 - clamp(min(d.x, d.y) - 0.5, 0.0, 1.0);
-        gl_FragColor = vec4(mix(uFloor, uLine, line * 0.8), 1.0);
-        #include <colorspace_fragment>
-      }
-    `,
-  });
-  return new THREE.Mesh(geometry, material);
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: palette.floor }));
 };
 
 /** Светлый контур стен — тонкие полосы вдоль отрезков коллизии. */

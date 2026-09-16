@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { MEMORY_LAYER } from '../echo/memoryView';
+import type { Recollection } from '../echo/sight';
 import { angleDelta, damp } from '../math/vec2';
 import type { MemoryObject } from './memoryObject';
 
@@ -6,9 +8,11 @@ import type { MemoryObject } from './memoryObject';
  * Отрисовка Memory Object или его куска: маска стирания — альфа спрайта (§6.3), край стёртой области
  * светится. Куски одного объекта делят одну текстуру картинки корня, у каждого своя маска
  * и своё окно UV в картинке. Вспышка (flash) подсвечивает края сразу после раскола.
+ * ghost — слепок в слое памяти: там, где объект видели в последний раз.
  */
 export class MemoryObjectView {
   readonly mesh: THREE.Mesh;
+  readonly ghost: THREE.Mesh;
   private readonly maskTexture: THREE.DataTexture;
   private readonly material: THREE.ShaderMaterial;
   private flash: number;
@@ -80,6 +84,22 @@ export class MemoryObjectView {
     geometry.translate(object.width / 2 - object.pivot.x, object.height / 2 - object.pivot.y, 0);
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.position.z = 0.015;
+    this.ghost = new THREE.Mesh(geometry, this.material);
+    this.ghost.position.z = 0.015;
+    this.ghost.layers.set(MEMORY_LAYER);
+    this.ghost.visible = false;
+  }
+
+  /** Радиус для проверки «видно ли объект». */
+  get sightRadius(): number {
+    return this.object.boundRadius * 0.6;
+  }
+
+  updateGhost(rec: Recollection): void {
+    this.ghost.visible = rec.known;
+    this.ghost.position.x = rec.pos.x;
+    this.ghost.position.y = rec.pos.y;
+    this.ghost.rotation.z = rec.angle;
   }
 
   /** alpha — доля шага физики для интерполяции положения. */
@@ -100,6 +120,7 @@ export class MemoryObjectView {
 
   dispose(): void {
     this.mesh.removeFromParent();
+    this.ghost.removeFromParent();
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.maskTexture.dispose();

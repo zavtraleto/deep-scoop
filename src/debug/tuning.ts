@@ -7,13 +7,15 @@ import {
   mouseConfig,
   movementConfig,
   stickConfig,
+  visionConfig,
 } from '../core/config';
 
 // Меняй версию, когда смысл или значения по умолчанию параметров меняются так, что старые сохранения вредны.
 // Новые поля добавлять можно без смены версии: mergeInto переносит только известные поля.
-const STORAGE_KEY = 'memory-dive:tuning:v4';
+const STORAGE_KEY = 'memory-dive:tuning:v5'; // v5: радиус эха 100 ед.
 const groups = {
   movement: movementConfig,
+  vision: visionConfig,
   cargo: cargoConfig,
   collect: collectConfig,
   stick: stickConfig,
@@ -72,7 +74,8 @@ export interface TuningStats {
 /** Состояние забега, которое удобно крутить руками. В localStorage не сохраняется. */
 export interface TuningRun {
   cargo: number;
-  resetObjects: () => void;
+  /** Вернуть уровень в начальное состояние: объекты, груз, осколки, изведанное, игрок на старте. */
+  resetLevel: () => void;
 }
 
 /** Панель тюнинга: параметры сохраняются в localStorage, кнопка копирует их JSON для переноса в config.ts. */
@@ -115,6 +118,36 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   live.add(stats, 'drift').name('занос').decimals(2).listen().disable();
 
   gui.add(debugConfig, 'showStickZones').name('👁 зоны стика у игрока');
+  gui.add(debugConfig, 'showLayout').name('👁 раскладка чанка');
+  gui.add(debugConfig, 'fog').name('👁 туман');
+
+  const v = gui.addFolder('Свет и эхо');
+  const li = visionConfig.light;
+  v.add(li, 'radius', 0.5, 12, 0.1).name('свет: радиус, ед.');
+  v.add(li, 'coneRange', 0.5, 20, 0.1).name('свет: луч, ед.');
+  v.add(li, 'coneAngleDeg', 0, 180, 1).name('свет: ширина луча, °');
+  v.add(li, 'softness', 0.01, 1, 0.01).name('свет: мягкость края');
+  const lk = visionConfig.look;
+  v.add(lk, 'ambientLevel', 0, 1, 0.01).name('ореол: прозрачность тумана');
+  v.add(lk, 'beamLevel', 0, 1, 0.01).name('прожектор: прозрачность тумана');
+  v.addColor(lk, 'color').name('цвет света');
+  v.add(lk, 'ambientTint', 0, 0.5, 0.005).name('ореол: подсвет');
+  v.add(lk, 'beamTint', 0, 0.5, 0.005).name('прожектор: подсвет');
+  const ec = visionConfig.echo;
+  v.add(ec, 'interval', 0.5, 15, 0.1).name('эхо: интервал, с');
+  v.add(ec, 'radius', 2, 150, 0.5).name('эхо: радиус, ед.');
+  v.add(ec, 'speed', 2, 100, 1).name('эхо: скорость кольца, ед./с');
+  v.add(ec, 'glow', 0.1, 6, 0.05).name('эхо: свечение, с');
+  v.add(ec, 'shardBoost', 0, 2, 0.05).name('осколок приближает эхо, с');
+  const sh = visionConfig.shards;
+  v.add(sh, 'magnetRadius', 0, 4, 0.05).name('осколки: магнит, ед.');
+  v.add(sh, 'magnetAccel', 1, 120, 1).name('осколки: сила магнита');
+  const fg = visionConfig.fog;
+  v.add(fg, 'unknownDarkness', 0, 1, 0.01).name('туман: неизвестное');
+  v.add(fg, 'memoryBrightness', 0, 1.5, 0.01).name('память: яркость');
+  v.add(fg, 'memorySaturation', 0, 1, 0.01).name('память: насыщенность');
+  v.add(fg, 'memoryBlur', 0, 10, 0.1).name('память: размытие');
+  v.add(fg, 'memoryWarp', 0, 0.03, 0.0005).name('память: плывение');
 
   live.add(stats, 'noise').name('шум (стирает)').listen().disable();
   live.add(stats, 'progress').name('извлечено, %').decimals(1).listen().disable();
@@ -131,7 +164,7 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   c.add(scoop, 'noseBlendSpeed', 0.1, 4, 0.05).name('на нос ниже скорости');
   c.add(scoop, 'turnRate', 1, 60, 0.5).name('сглаживание поворота');
   c.add(collectConfig, 'particlesPerStep', 0, 30, 1).name('частиц за шаг');
-  c.add(run, 'resetObjects').name('↺ Восстановить объекты и груз');
+  gui.add(run, 'resetLevel').name('↺ Сбросить уровень');
 
   const f = gui.addFolder('Парение и раскол');
   const fl = collectConfig.float;
@@ -165,7 +198,7 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
 
   const cam = gui.addFolder('Камера');
   cam.add(cameraConfig, 'fov', 15, 90, 1).name('fov');
-  cam.add(cameraConfig, 'viewSize', 8, 60, 0.5).name('обзор, ед.');
+  cam.add(cameraConfig, 'viewSize', 8, 140, 0.5).name('обзор, ед.');
   cam.add(cameraConfig, 'followRate', 0.5, 20, 0.1).name('следование');
   cam.add(cameraConfig, 'leadTime', 0, 1.5, 0.01).name('опережение, с');
   cam.add(cameraConfig, 'leadVerticalScale', 0, 4, 0.05).name('опереж. по вертикали ×');

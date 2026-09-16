@@ -36,6 +36,18 @@ describe('Grid.cutCorners', () => {
   });
 });
 
+describe('Grid.fillNotches', () => {
+  it('засыпает зазубрины, но не трогает ход шириной 2', () => {
+    const g = new Grid(10, 8);
+    g.carveRect(1, 3, 8, 2); // ход шириной 2
+    g.carveRect(4, 2, 1, 1); // зазубрина над ходом
+    g.fillNotches();
+    expect(g.get(4, 2)).toBe(Cell.Solid);
+    expect(g.get(1, 3)).toBe(Cell.Empty);
+    expect(g.get(8, 4)).toBe(Cell.Empty);
+  });
+});
+
 describe('Grid.buildWalls', () => {
   it('комната 1×1 даёт замкнутый контур из 4 отрезков', () => {
     const g = new Grid(3, 3);

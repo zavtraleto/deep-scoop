@@ -119,6 +119,31 @@ export class Grid {
     }
   }
 
+  /**
+   * Засыпать тупиковые зазубрины: пустые клетки, у которых скала с трёх сторон. Повторяется, пока
+   * такие есть. Ходы уже двух клеток генератор не строит, поэтому настоящие проходы не страдают.
+   */
+  fillNotches(): void {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let y = 0; y < this.height; y++) {
+        for (let x = 0; x < this.width; x++) {
+          if (this.get(x, y) !== Cell.Empty) continue;
+          const solid =
+            (this.get(x - 1, y) === Cell.Solid ? 1 : 0) +
+            (this.get(x + 1, y) === Cell.Solid ? 1 : 0) +
+            (this.get(x, y - 1) === Cell.Solid ? 1 : 0) +
+            (this.get(x, y + 1) === Cell.Solid ? 1 : 0);
+          if (solid >= 3) {
+            this.set(x, y, Cell.Solid);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
   isPassable(cx: number, cy: number): boolean {
     return this.get(cx, cy) !== Cell.Solid;
   }
@@ -181,6 +206,11 @@ export class WallIndex {
     private readonly buckets: Segment[][],
     readonly all: Segment[],
   ) {}
+
+  /** Отрезки стен, границы которых лежат на клетке (cx, cy). */
+  inCell(cx: number, cy: number): readonly Segment[] {
+    return cx >= 0 && cy >= 0 && cx < this.width && cy < this.height ? this.buckets[cy * this.width + cx] : [];
+  }
 
   /** Отрезки стен в клетках вокруг круга (x, y, r). Без повторов. */
   near(x: number, y: number, r: number, out: Segment[] = []): Segment[] {
