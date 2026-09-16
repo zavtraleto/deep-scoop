@@ -1,12 +1,12 @@
 import type { Vec2 } from '../math/vec2';
-import { EraseMask } from './eraseMask';
-import { MemoryObject, maskSize, objectValue, type ObjectClass, type ObjectClassDef } from './memoryObject';
+import { createRootObject, maskSize, objectValue, type MemoryObject, type ObjectClass, type ObjectClassDef } from './memoryObject';
 
 export interface ObjectArt {
   /** Картинка высокого разрешения для текстуры. */
   canvas: HTMLCanvasElement;
-  /** RGB картинки в разрешении маски (строка 0 — низ) — цвет частиц стёртой памяти. */
+  /** RGB картинки в разрешении маски корня (строка 0 — низ) — цвет частиц стёртой памяти. */
   colors: Uint8Array;
+  maskWidth: number;
 }
 
 export interface BuiltObject {
@@ -147,6 +147,7 @@ export const buildTelevision = (
   playerDiameter: number,
   pixelsPerUnit: number,
   chunkIndex = 0,
+  rng: () => number = Math.random,
 ): BuiltObject => {
   const def = classes[cls];
   const width = def.size * playerDiameter;
@@ -158,6 +159,16 @@ export const buildTelevision = (
 
   const { w, h } = maskSize(width, height, pixelsPerUnit);
   const { opaque, colors } = sampleForMask(canvas, w, h);
-  const object = new MemoryObject(center, width, height, cls, objectValue(def.value, chunkIndex), new EraseMask(w, h, opaque));
-  return { object, art: { canvas, colors } };
+  const object = createRootObject({
+    cls,
+    center,
+    width,
+    height,
+    value: objectValue(def.value, chunkIndex),
+    opaque,
+    maskWidth: w,
+    maskHeight: h,
+    phase: [rng() * 7, rng() * 7, rng() * 7, rng() * 7],
+  });
+  return { object, art: { canvas, colors, maskWidth: w } };
 };

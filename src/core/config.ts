@@ -1,5 +1,7 @@
 // Стартовые параметры (Приложение A GDD). Объект мутабельный — его правит панель тюнинга.
 
+import type { FloatParams } from '../collect/floatPhysics';
+import type { FractureParams } from '../collect/fracture';
 import type { ObjectClass, ObjectClassDef } from '../collect/memoryObject';
 import type { ScoopParams } from '../collect/scoop';
 import type { MovementParams } from '../player/movement';
@@ -55,6 +57,33 @@ export const collectConfig = {
     medium: { size: 4, value: 3 },
     large: { size: 7, value: 6 },
   } satisfies Record<ObjectClass, ObjectClassDef>,
+  /** Парение и физика объектов (решения этапа 3 с пользователем: вязкая «подводная» среда). */
+  float: {
+    linearDrag: 1.0, // 1/с
+    angularDrag: 1.6, // 1/с
+    hoverRadius: 0.8, // ед., дрейф вокруг дома
+    hoverSpeed: 0.35, // рад/с, темп дрейфа
+    hoverSpring: 0.8, // 1/с², тяга к точке дрейфа
+    hoverWobbleDeg: 3, // покачивание ±3°
+    wobbleSpring: 1.5, // 1/с²
+    settleSpeed: 0.12, // ед./с, разлетевшийся кусок оседает и заводит новый дом
+    wallRestitution: 0.3, // мягкий отскок от стен
+    collisionRadiusScale: 0.85, // круг столкновений от круга равной площади
+    separation: 6, // 1/с², мягкое расталкивание кусков
+    nudge: 0.35, // толчок ковша
+    nudgeMaxSpeedFrac: 0.35, // толчок не разгоняет быстрее доли скорости игрока
+    nudgeTorque: 0.06, // доля толчка во вращение — вращение должно быть едва заметным
+  } satisfies FloatParams,
+  /** Раскол по реальному разрезу. */
+  fracture: {
+    minPieceArea: 0.5, // ед.², меньше — крошка, рассыпается в груз
+    splitSpeed: 1.0, // ед./с, разлёт куска эталонной площади — медленно, «разрезанный под водой плод»
+    splitRefArea: 4, // ед.²
+    splitInherit: 0.12, // доля скорости игрока
+    splitSpin: 0.12, // рад/с — вращение едва заметно
+    burstPerPiece: 10, // частиц вспышки вдоль разреза
+  } satisfies FractureParams,
+  fractureCheckInterval: 0.1, // с
   /** Разрешение маски: 64 px на small (2 ед.) → 32 px/ед., крупные пропорционально (§6.3). */
   maskPixelsPerUnit: 32,
   /** Сколько стёртых пикселей за шаг физики превращать в частицы. */
@@ -66,6 +95,14 @@ export const stickConfig = {
   deadZone: 0.1, // доля радиуса
   /** true — центр стика подтягивается за пальцем, если тот ушёл дальше радиуса. */
   followFinger: false,
+};
+
+/** Управление мышью: держи ЛКМ — персонаж плывёт к курсору (решение пользователя). */
+export const mouseConfig = {
+  deadZone: 0.6, // ед., вокруг персонажа ввод нулевой
+  fullDistance: 5, // ед. (~2.5 клетки), дальше — полная сила
+  /** Старый режим для сравнения: мышь работает как виртуальный стик. */
+  asStick: false,
 };
 
 export const cameraConfig = {

@@ -1,5 +1,13 @@
 import GUI from 'lil-gui';
-import { cameraConfig, cargoConfig, collectConfig, debugConfig, movementConfig, stickConfig } from '../core/config';
+import {
+  cameraConfig,
+  cargoConfig,
+  collectConfig,
+  debugConfig,
+  mouseConfig,
+  movementConfig,
+  stickConfig,
+} from '../core/config';
 
 // Меняй версию, когда смысл или значения по умолчанию параметров меняются так, что старые сохранения вредны.
 // Новые поля добавлять можно без смены версии: mergeInto переносит только известные поля.
@@ -9,6 +17,7 @@ const groups = {
   cargo: cargoConfig,
   collect: collectConfig,
   stick: stickConfig,
+  mouse: mouseConfig,
   camera: cameraConfig,
   debug: debugConfig,
 };
@@ -54,8 +63,10 @@ export interface TuningStats {
   drift: number;
   /** §6.4: ковш стирает на этом шаге. */
   noise: boolean;
-  /** Прогресс извлечения объекта, %. */
+  /** Прогресс извлечения объектов уровня, %. */
   progress: number;
+  /** Сколько сейчас объектов и кусков. */
+  pieces: number;
 }
 
 /** Состояние забега, которое удобно крутить руками. В localStorage не сохраняется. */
@@ -107,6 +118,7 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
 
   live.add(stats, 'noise').name('шум (стирает)').listen().disable();
   live.add(stats, 'progress').name('извлечено, %').decimals(1).listen().disable();
+  live.add(stats, 'pieces').name('объектов и кусков').listen().disable();
 
   const c = gui.addFolder('Ковш и груз');
   c.add(run, 'cargo', 0, 30, 0.1).name('cargo').listen();
@@ -119,12 +131,37 @@ export const createTuningPanel = (stats: TuningStats, run: TuningRun): GUI => {
   c.add(scoop, 'noseBlendSpeed', 0.1, 4, 0.05).name('на нос ниже скорости');
   c.add(scoop, 'turnRate', 1, 60, 0.5).name('сглаживание поворота');
   c.add(collectConfig, 'particlesPerStep', 0, 30, 1).name('частиц за шаг');
-  c.add(run, 'resetObjects').name('↺ Восстановить объект и груз');
+  c.add(run, 'resetObjects').name('↺ Восстановить объекты и груз');
 
-  const s = gui.addFolder('Стик');
-  s.add(stickConfig, 'radius', 30, 200, 1).name('радиус, px');
-  s.add(stickConfig, 'deadZone', 0, 0.5, 0.01).name('мёртвая зона');
-  s.add(stickConfig, 'followFinger').name('центр за пальцем');
+  const f = gui.addFolder('Парение и раскол');
+  const fl = collectConfig.float;
+  f.add(fl, 'linearDrag', 0, 5, 0.05).name('вязкость движения');
+  f.add(fl, 'angularDrag', 0, 8, 0.05).name('вязкость вращения');
+  f.add(fl, 'hoverRadius', 0, 3, 0.05).name('радиус дрейфа, ед.');
+  f.add(fl, 'hoverSpeed', 0, 2, 0.01).name('темп дрейфа');
+  f.add(fl, 'hoverSpring', 0, 5, 0.05).name('тяга к дому');
+  f.add(fl, 'hoverWobbleDeg', 0, 20, 0.5).name('покачивание, °');
+  f.add(fl, 'settleSpeed', 0.01, 1, 0.01).name('оседание ниже скорости');
+  f.add(fl, 'wallRestitution', 0, 1, 0.05).name('отскок от стен');
+  f.add(fl, 'collisionRadiusScale', 0.3, 1.5, 0.05).name('радиус столкновений ×');
+  f.add(fl, 'separation', 0, 30, 0.5).name('расталкивание');
+  f.add(fl, 'nudge', 0, 3, 0.05).name('толчок ковша');
+  f.add(fl, 'nudgeMaxSpeedFrac', 0, 1, 0.01).name('толчок: макс. доля скорости');
+  f.add(fl, 'nudgeTorque', 0, 2, 0.05).name('толчок во вращение');
+  const fr = collectConfig.fracture;
+  f.add(fr, 'minPieceArea', 0, 4, 0.05).name('крошка меньше, ед.²');
+  f.add(fr, 'splitSpeed', 0, 5, 0.05).name('скорость разлёта');
+  f.add(fr, 'splitInherit', 0, 1, 0.01).name('доля скорости игрока');
+  f.add(fr, 'splitSpin', 0, 2, 0.01).name('вращение при расколе');
+  f.add(fr, 'burstPerPiece', 0, 40, 1).name('искр вспышки на кусок');
+
+  const s = gui.addFolder('Ввод');
+  s.add(stickConfig, 'radius', 30, 200, 1).name('тач: радиус стика, px');
+  s.add(stickConfig, 'deadZone', 0, 0.5, 0.01).name('тач: мёртвая зона');
+  s.add(stickConfig, 'followFinger').name('тач: центр за пальцем');
+  s.add(mouseConfig, 'deadZone', 0, 3, 0.05).name('мышь: мёртвая зона, ед.');
+  s.add(mouseConfig, 'fullDistance', 0.5, 15, 0.1).name('мышь: полная сила, ед.');
+  s.add(mouseConfig, 'asStick').name('мышь как стик (старый режим)');
 
   const cam = gui.addFolder('Камера');
   cam.add(cameraConfig, 'fov', 15, 90, 1).name('fov');

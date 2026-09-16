@@ -1,25 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { stepCollect, type Cargo } from './collector';
 import { convexHull, EraseMask } from './eraseMask';
-import { MemoryObject, maskSize, objectValue } from './memoryObject';
-import { createScoopState, scoopShape, scoopTargetAngle, type ScoopParams } from './scoop';
+import { objectValue } from './memoryObject';
+import { createScoopState, scoopShape, scoopTargetAngle } from './scoop';
+import { solidObject, testScoop } from './testHelpers';
 
-const scoopParams: ScoopParams = {
-  width: 1.2,
-  depth: 0.6,
-  offset: 0.3,
-  followNose: false,
-  noseBlendSpeed: 1,
-  turnRate: 1000, // мгновенный поворот — тестам нужна чистая геометрия
-};
+const scoopParams = testScoop;
 
 const fullMask = (w: number, h: number) => new EraseMask(w, h, new Uint8Array(w * h).fill(1));
-
-/** Сплошной квадратный объект size×size с центром в (0,0), 32 px/ед. */
-const solidObject = (size = 7, value = 6) => {
-  const { w, h } = maskSize(size, size, 32);
-  return new MemoryObject({ x: 0, y: 0 }, size, size, 'large', value, fullMask(w, h));
-};
 
 describe('EraseMask', () => {
   it('закрашивает прямоугольник ровно по центрам пикселей', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { followOrigin, stickToInput } from './stickMath';
+import { cursorToInput, followOrigin, stickToInput } from './stickMath';
 
 const p = { radius: 80, deadZone: 0.1 };
 
@@ -24,5 +24,23 @@ describe('followOrigin', () => {
   it('подтягивает центр так, чтобы палец оказался на радиусе', () => {
     const o = followOrigin({ x: 0, y: 0 }, { x: 100, y: 0 }, 80);
     expect(o).toEqual({ x: 20, y: 0 });
+  });
+});
+
+describe('cursorToInput', () => {
+  const p = { deadZone: 0.6, fullDistance: 5 };
+  const player = { x: 10, y: -10 };
+
+  it('курсор на персонаже — ввода нет', () => {
+    expect(cursorToInput(player, { x: 10.4, y: -10.2 }, p)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('сила растёт линейно и насыщается на fullDistance', () => {
+    expect(cursorToInput(player, { x: 10, y: -10 + 2.8 }, p).y).toBeCloseTo(0.5); // (2.8 − 0.6) / 4.4
+    expect(cursorToInput(player, { x: 10 + 5, y: -10 }, p).x).toBeCloseTo(1);
+    const far = cursorToInput(player, { x: 10 - 30, y: -10 - 30 }, p);
+    expect(Math.hypot(far.x, far.y)).toBeCloseTo(1);
+    expect(far.x).toBeLessThan(0);
+    expect(far.y).toBeLessThan(0); // мир: y вверх, курсор ниже — вниз
   });
 });

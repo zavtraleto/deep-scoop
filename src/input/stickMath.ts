@@ -26,3 +26,23 @@ export const followOrigin = (origin: Vec2, finger: Vec2, radius: number): Vec2 =
   const k = (len - radius) / len;
   return { x: origin.x + dx * k, y: origin.y + dy * k };
 };
+
+export interface CursorParams {
+  /** Мёртвая зона вокруг персонажа, ед. мира. */
+  deadZone: number;
+  /** Расстояние, на котором сила становится полной, ед. мира. */
+  fullDistance: number;
+}
+
+/**
+ * Управление мышью: вектор от персонажа к курсору (оба в мировых координатах, y вверх)
+ * в вектор ввода. Сила растёт линейно от края мёртвой зоны до fullDistance.
+ */
+export const cursorToInput = (player: Vec2, cursor: Vec2, p: CursorParams): Vec2 => {
+  const dx = cursor.x - player.x;
+  const dy = cursor.y - player.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= p.deadZone || p.fullDistance <= p.deadZone) return { x: 0, y: 0 };
+  const strength = clamp((len - p.deadZone) / (p.fullDistance - p.deadZone), 0, 1);
+  return { x: (dx / len) * strength, y: (dy / len) * strength };
+};

@@ -47,4 +47,15 @@ export class FollowCamera {
     const distance = visibleHeight / 2 / Math.tan(THREE.MathUtils.degToRad(c.fov) / 2);
     this.camera.position.set(this.pos.x, this.pos.y, distance);
   }
+
+  /**
+   * Точка игрового слоя (z = 0) под точкой экрана. u, v — доли ширины и высоты холста (v растёт вниз).
+   * Камера смотрит перпендикулярно слою без вращения, поэтому проекция считается напрямую.
+   */
+  screenToWorld(u: number, v: number): Vec2 {
+    const cam = this.camera;
+    const halfH = cam.position.z * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    const halfW = halfH * cam.aspect;
+    return { x: cam.position.x + (u * 2 - 1) * halfW, y: cam.position.y - (v * 2 - 1) * halfH };
+  }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { cargoConfig, collectConfig, movementConfig, physicsConfig, PLAYER_RADIUS } from './config';
-import { stepCollect, type Cargo } from '../collect/collector';
+import { CollectWorld } from '../collect/collectWorld';
+import type { Cargo } from '../collect/collector';
 import { EraseParticles } from '../collect/eraseParticles';
 import type { MemoryObject, ObjectSample } from '../collect/memoryObject';
 import { MemoryObjectView } from '../collect/memoryObjectView';
@@ -17,13 +18,14 @@ import { StickZonesDebug } from '../player/stickZonesDebug';
 import { FollowCamera } from '../render/followCamera';
 import { resolveCircleVsWalls } from '../world/collision';
 import type { WallIndex } from '../world/grid';
-import { collectTestMap } from '../world/testMaps';
+import { collectTestMap, type ObjectPlacement } from '../world/testMaps';
 import { buildWorldMesh, palette } from '../world/worldMesh';
 
-interface PlacedObject {
-  object: MemoryObject;
+/** Картинка корня объекта: одна текстура на все его куски. */
+interface RootArt {
   art: ObjectArt;
-  view: MemoryObjectView;
+  texture: THREE.Texture;
+  totalOpaque: number;
 }
 
 export class Game {
@@ -41,18 +43,20 @@ export class Game {
   private lastInput: Vec2 = { x: 0, y: 0 };
   private readonly zonesDebug = new StickZonesDebug();
 
-  // Сбор (этап 2).
-  private readonly objects: PlacedObject[];
+  // Сбор и парящие объекты.
+  private readonly world = new CollectWorld();
+  private readonly placements: ObjectPlacement[];
+  private readonly rootArts = new Map<number, RootArt>();
+  private readonly views = new Map<MemoryObject, MemoryObjectView>();
   private readonly scoop: ScoopState = createScoopState();
   private prevScoopAngle = 0;
   private readonly scoopView = new ScoopView();
   private readonly particles = new EraseParticles();
   private readonly gauge = new CargoGauge();
-  private readonly samples: ObjectSample[] = [];
   private erasing = false;
   private readonly run: TuningRun & Cargo;
 
-  private readonly stats: TuningStats = { speed: 0, input: 0, mass: 1, drift: 0, noise: false, progress: 0 };
+  private readonly stats: TuningStats = { speed: 0, input: 0, mass: 1, drift: 0, noise: false, progress: 0, pieces: 0 };
   private accumulator = 0;
   private lastTime = -1;
   private time = 0;
@@ -66,13 +70,8 @@ export class Game {
     const map = collectTestMap();
     this.walls = map.grid.buildWalls();
     this.scene.add(buildWorldMesh(map.grid, this.walls));
-
-    this.objects = map.objects.map(({ cls, center }) => {
-      const built = buildTelevision(center, cls, collectConfig.classes, PLAYER_RADIUS * 2, collectConfig.maskPixelsPerUnit);
-      const view = new MemoryObjectView(built.object, built.art);
-      this.scene.add(view.mesh);
-      return { ...built, view };
-    });
+    this.placements = map.objects;
+    this.spawnObjects();
 
     this.scene.add(this.scoopView.mesh, this.sprite.mesh, this.gauge.mesh, this.particles.points, this.zonesDebug.group);
 
@@ -84,7 +83,9 @@ export class Game {
       cargo: 0,
       cargoMax: cargoConfig.cargoMax,
       resetObjects: () => {
-        for (const o of this.objects) o.object.mask.reset();
+        this.world.clear();
+        this.syncObjectViews(); // убрать старые виды, пока их текстуры ещё живы
+        this.spawnObjects();
         this.run.cargo = 0;
       },
     };
@@ -98,6 +99,19 @@ export class Game {
 
   start(): void {
     this.renderer.setAnimationLoop(this.frame);
+  }
+
+  private spawnObjects() {
+    for (const r of this.rootArts.values()) r.texture.dispose();
+    this.rootArts.clear();
+    for (const { cls, center } of this.placements) {
+      const built = buildTelevision(center, cls, collectConfig.classes, PLAYER_RADIUS * 2, collectConfig.maskPixelsPerUnit);
+      const texture = new THREE.CanvasTexture(built.art.canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      this.rootArts.set(built.object.root.id, { art: built.art, texture, totalOpaque: built.object.root.totalOpaque });
+      this.world.add(built.object);
+    }
   }
 
   private resize = () => {
@@ -132,8 +146,10 @@ export class Game {
     const scoopAngle = this.prevScoopAngle + angleDelta(this.prevScoopAngle, this.scoop.angle) * alpha;
     const player = { x, y };
 
-    for (const o of this.objects) o.view.update(this.time);
-    this.spawnParticles(player);
+    this.syncObjectViews();
+    for (const view of this.views.values()) view.update(this.time, alpha, dt);
+    this.spawnParticles(this.world.samples, player, true);
+    this.spawnParticles(this.world.burst, player, false);
     this.particles.setViewport(this.container.clientHeight, this.cam.camera.fov);
     this.particles.update(dt, player);
 
@@ -146,15 +162,32 @@ export class Game {
     this.renderer.render(this.scene, this.cam.camera);
   };
 
-  private spawnParticles(player: Vec2) {
-    for (const s of this.samples) {
-      const placed = this.objects.find((o) => o.object === s.object);
-      if (!placed) continue;
-      const i = (s.py * s.object.mask.width + s.px) * 3;
-      const c = placed.art.colors;
-      this.particles.spawn(s, player, c[i], c[i + 1], c[i + 2]);
+  /** Создать и убрать отрисовку по событиям мира: раскол заменяет объект кусками. */
+  private syncObjectViews() {
+    for (const e of this.world.events) {
+      if (e.type === 'removed') {
+        this.views.get(e.object)?.dispose();
+        this.views.delete(e.object);
+        continue;
+      }
+      const rootArt = this.rootArts.get(e.object.root.id);
+      if (!rootArt) continue;
+      const view = new MemoryObjectView(e.object, rootArt.texture, e.bySplit ? 1 : 0);
+      this.views.set(e.object, view);
+      this.scene.add(view.mesh);
     }
-    this.samples.length = 0;
+    this.world.events.length = 0;
+  }
+
+  private spawnParticles(samples: ObjectSample[], player: Vec2, homing: boolean) {
+    for (const s of samples) {
+      const root = this.rootArts.get(s.object.root.id);
+      if (!root) continue;
+      const i = ((s.py + s.object.offsetY) * root.art.maskWidth + s.px + s.object.offsetX) * 3;
+      const c = root.art.colors;
+      this.particles.spawn(s, player, c[i], c[i + 1], c[i + 2], homing);
+    }
+    samples.length = 0;
   }
 
   private fixedUpdate(dt: number) {
@@ -163,7 +196,10 @@ export class Game {
     this.prevHeading = this.move.heading;
     this.prevScoopAngle = this.scoop.angle;
 
-    const input = this.input.vector;
+    const input = this.input.vector({
+      player: this.pos,
+      screenToWorld: (u, v) => this.cam.screenToWorld(u, v),
+    });
     this.lastInput = input;
     this.run.cargoMax = cargoConfig.cargoMax;
     const mass = massFor(this.run.cargo, this.run.cargoMax, movementConfig.baseMass);
@@ -173,17 +209,14 @@ export class Game {
     this.pos.y += this.move.vel.y * dt;
     resolveCircleVsWalls(this.pos, this.move.vel, PLAYER_RADIUS, this.walls);
 
-    const res = stepCollect(
+    const res = this.world.step(
+      { pos: this.pos, vel: this.move.vel, heading: this.move.heading },
       this.scoop,
-      this.pos,
-      this.move.vel,
-      this.move.heading,
-      this.objects.map((o) => o.object),
       this.run,
-      collectConfig.scoop,
+      this.walls,
+      collectConfig,
       dt,
-      this.samples,
-      this.samples.length + collectConfig.particlesPerStep,
+      collectConfig.particlesPerStep,
     );
     this.erasing = res.noise;
 
@@ -192,6 +225,10 @@ export class Game {
     this.stats.mass = mass;
     this.stats.drift = this.move.drift;
     this.stats.noise = res.noise;
-    this.stats.progress = (this.objects[0]?.object.progress ?? 0) * 100;
+    this.stats.pieces = this.world.objects.length;
+    const remaining = this.world.objects.reduce((s, o) => s + o.mask.remaining, 0);
+    let total = 0;
+    for (const r of this.rootArts.values()) total += r.totalOpaque;
+    this.stats.progress = total > 0 ? (1 - remaining / total) * 100 : 100;
   }
 }

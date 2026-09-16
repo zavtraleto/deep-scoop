@@ -6,8 +6,15 @@ const scratch: Segment[] = [];
 /**
  * Выталкивает круг из стен и гасит компонент скорости, направленный в стену, —
  * игрок скользит вдоль стены. Меняет pos и vel на месте. Возвращает true, если было касание.
+ * restitution > 0 — мягкий отскок (доля нормальной скорости, которая отражается).
  */
-export const resolveCircleVsWalls = (pos: Vec2, vel: Vec2, radius: number, walls: WallIndex): boolean => {
+export const resolveCircleVsWalls = (
+  pos: Vec2,
+  vel: Vec2,
+  radius: number,
+  walls: WallIndex,
+  restitution = 0,
+): boolean => {
   let touched = false;
   const segments = walls.near(pos.x, pos.y, radius, scratch);
   for (let iter = 0; iter < 4; iter++) {
@@ -35,8 +42,8 @@ export const resolveCircleVsWalls = (pos: Vec2, vel: Vec2, radius: number, walls
       pos.y += ny * push;
       const vn = vel.x * nx + vel.y * ny;
       if (vn < 0) {
-        vel.x -= nx * vn;
-        vel.y -= ny * vn;
+        vel.x -= nx * vn * (1 + restitution);
+        vel.y -= ny * vn * (1 + restitution);
       }
       moved = true;
       touched = true;

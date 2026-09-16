@@ -17,14 +17,19 @@ export class EraseMask {
   /** Маска менялась с последней выгрузки в текстуру. */
   dirty = true;
 
+  /**
+   * initialErased — начальное состояние стёртости (у куска после раскола: стёртое родителя и чужие куски).
+   * Непрозрачные пиксели, помеченные в нём стёртыми, в totalOpaque не входят.
+   */
   constructor(
     readonly width: number,
     readonly height: number,
     readonly opaque: Uint8Array,
+    initialErased?: Uint8Array,
   ) {
-    this.erased = new Uint8Array(width * height);
+    this.erased = initialErased ?? new Uint8Array(width * height);
     let total = 0;
-    for (let i = 0; i < opaque.length; i++) total += opaque[i] ? 1 : 0;
+    for (let i = 0; i < opaque.length; i++) total += opaque[i] && !this.erased[i] ? 1 : 0;
     this.totalOpaque = total;
   }
 
@@ -33,10 +38,19 @@ export class EraseMask {
     return this.totalOpaque === 0 ? 0 : this.erasedOpaque / this.totalOpaque;
   }
 
-  reset(): void {
-    this.erased.fill(0);
-    this.erasedOpaque = 0;
+  /** Непрозрачные пиксели, которые ещё можно стереть. */
+  get remaining(): number {
+    return this.totalOpaque - this.erasedOpaque;
+  }
+
+  /** Стереть один пиксель, если он ещё не стёрт. Возвращает true, если это был нестёртый непрозрачный пиксель. */
+  eraseAt(i: number): boolean {
+    if (this.erased[i]) return false;
+    this.erased[i] = 255;
     this.dirty = true;
+    if (!this.opaque[i]) return false;
+    this.erasedOpaque++;
+    return true;
   }
 
   /**
@@ -81,18 +95,13 @@ export class EraseMask {
       const col1 = Math.min(this.width - 1, Math.floor(xr - 0.5));
       const base = row * this.width;
       for (let col = col0; col <= col1; col++) {
-        const i = base + col;
-        if (this.erased[i]) continue;
-        this.erased[i] = 255;
-        this.dirty = true;
-        if (!this.opaque[i]) continue;
+        if (!this.eraseAt(base + col)) continue;
         newly++;
         seen++;
         // Прореживание: берём каждый ~k-й пиксель, пока есть место.
         if (samples && samples.length < maxSamples && seen % 23 === 1) samples.push({ px: col, py: row });
       }
     }
-    this.erasedOpaque += newly;
     return newly;
   }
 }
